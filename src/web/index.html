@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html lang="en" class="p-3 h-100">
+
+<head>
+	<title>Waveboard</title>
+
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=0.8">
+
+	<link rel="stylesheet" href="css/bootstrap/bootstrap.css">
+	<link rel="stylesheet" href="css/fontawesome/css/all.css">
+
+	<script src="js/eventlistenerhook.js"></script>
+	<script src="js/jquery.js"></script>
+	<script src="js/lodash.js"></script>
+	<script src="js/bootstrap/bootstrap.bundle.js"></script>
+
+	<script src="webui.js"></script>
+	<script src="js/postload.js"></script>
+</head>
+
+<body data-bs-theme="dark" class="container-fluid d-flex flex-column gap-3 h-100">
+	<div id="header" class="">
+
+	</div>
+
+	<nav>
+		<div id="tabslist" class="nav nav-tabs flex-sm-nowrap overflow-y-hidden overflow-x-auto" role="tablist">
+			<button class="nav-link active flex-shrink-0" id="log_output-tab-button" data-bs-toggle="tab"
+				data-bs-target="#log_output-tab" type="button" role="tab" aria-controls="log_output-tab"
+				aria-selected="true">
+				Log output
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="audio-tab-button" data-bs-toggle="tab"
+				data-bs-target="#audio-tab" type="button" role="tab" aria-controls="audio-tab" aria-selected="false">
+				Audio
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="downloader-tab-button" data-bs-toggle="tab"
+				data-bs-target="#downloader-tab" type="button" role="tab" aria-controls="downloader-tab"
+				aria-selected="false">
+				Downloader
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="log_input-tab-button" data-bs-toggle="tab"
+				data-bs-target="#log_input-tab" type="button" role="tab" aria-controls="log_input-tab"
+				aria-selected="false">
+				Watcher
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="queue-tab-button" data-bs-toggle="tab"
+				data-bs-target="#queue-tab" type="button" role="tab" aria-controls="queue-tab" aria-selected="false">
+				Queue
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="tts-tab-button" data-bs-toggle="tab" data-bs-target="#tts-tab"
+				type="button" role="tab" aria-controls="tts-tab" aria-selected="false">
+				TTS
+			</button>
+
+			<button class="nav-link flex-shrink-0" id="settings-tab-button" data-bs-toggle="tab"
+				data-bs-target="#settings-tab" type="button" role="tab" aria-controls="settings-tab"
+				aria-selected="false">
+				Settings
+			</button>
+		</div>
+	</nav>
+
+	<div id="tabcontent" class="tab-content row flex-fill">
+		<div class="tab-pane fade show active" id="log_output-tab" role="tabpanel"
+			aria-labelledby="log_output-tab-button" tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<textarea id="log_output-entry" class="form-control flex-fill" type="text" placeholder="No output"
+					readonly></textarea>
+
+				<div class="row">
+					<div class="col">
+						<button id="set_log_output-button" type="button" class="btn btn-outline-light"
+							data-bs-toggle="tooltip" data-bs-title="Cannot be the same as watch file">
+							Set output file
+						</button>
+
+						<button id="clear_log_output-button" type="button" class="btn btn-outline-light ms-1">
+							Clear output file
+						</button>
+					</div>
+				</div>
+
+				<span>
+					Current log file : <span id="log_output-file"></span>
+				</span>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="audio-tab" role="tabpanel" aria-labelledby="audio-tab-button" tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<div class="form-floating input-group">
+					<input type="text" id="audiofolder-name" class="form-control" aria-label="Audio folder" readonly>
+					</input>
+
+					<label for="audiofolder-name">Audio folder</label>
+
+					<button id="audiofolder-button" class="btn btn-outline-light ms-3">
+						Choose folder
+					</button>
+				</div>
+
+				<span>Files list</span>
+
+				<span>Use <kbd>Backspace</kbd> to unbind tracks</span>
+
+				<div class="overflow-y-auto flex-fill" style="min-height: 20em;">
+					<div style="max-height: 0px;">
+						<table id="fileslist-table" class="table">
+							<thead id="fileslist-header" class="sticky-top">
+								<tr>
+									<th>ID</th>
+									<th>Name</th>
+									<th>Extension</th>
+									<th>Volume (%)</th>
+									<th>Binding</th>
+									<th>Solo</th>
+									<th>Preview</th>
+								</tr>
+							</thead>
+
+							<tbody id="fileslist-body" class="table-group-divider">
+
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="downloader-tab" role="tabpanel" aria-labelledby="downloader-tab-button"
+			tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<div class="form-floating input-group">
+					<input type="text" id="videourl-input" class="form-control" aria-label="Video URL">
+					</input>
+
+					<label for="videourl-input">Video URL</label>
+
+					<button id="downloadvideo-button" class="btn btn-outline-light ms-3">
+						Download video
+					</button>
+				</div>
+
+				<div class="form-floating input-group">
+					<input type="text" id="videofile-input" class="form-control" aria-label="File name">
+					</input>
+
+					<label for="videofile-input">File name</label>
+				</div>
+
+				<div class="form-check">
+					<input class="form-check-input" type="checkbox" id="playafterdownload-checkmark"
+						data-bs-toggle="tooltip" data-bs-title="Only works if you have a directory">
+
+					<label class="form-check-label" for="playafterdownload-checkmark">
+						Play after download
+					</label>
+				</div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="log_input-tab" role="tabpanel" aria-labelledby="log_input-tab-button"
+			tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<div class="row">
+					<span class="col">
+						Blocked users
+					</span>
+
+					<span class="col">
+						Allowed users
+					</span>
+				</div>
+
+				<div class="d-flex flex-row flex-fill gap-3">
+					<div class="overflow-y-auto flex-fill" style="min-height: 20em;">
+						<div style="max-height: 0px;">
+							<table id="blockedlist-table" class="table">
+								<thead id="blockedlist-header" class="sticky-top">
+									<tr>
+										<th>Name</th>
+										<th>Remove</th>
+									</tr>
+								</thead>
+
+								<tbody id="blockedlist-body" class="table-group-divider">
+
+								</tbody>
+							</table>
+						</div>
+					</div>
+
+					<div class="overflow-y-auto flex-fill" style="min-height: 20em;">
+						<div style="max-height: 0px;">
+							<table id="allowedlist-table" class="table">
+								<thead id="allowedlist-header" class="sticky-top">
+									<tr>
+										<th>Name</th>
+										<th>Remove</th>
+									</tr>
+								</thead>
+
+								<tbody id="allowedlist-body" class="table-group-divider">
+
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</div>
+
+				<div class="d-flex gap-3">
+					<div class="col form-floating input-group">
+						<input type="text" id="block_user-name" class="form-control" aria-label="Block user">
+						</input>
+
+						<label for="block_user-name">User to block</label>
+
+						<button id="block_user-button" class="btn btn-outline-light ms-3">
+							Block
+						</button>
+					</div>
+
+					<div class="col form-floating input-group">
+						<input type="text" id="allow_user-name" class="form-control" aria-label="Allow user">
+						</input>
+
+						<label for="allow_user-name">User to allow</label>
+
+						<button id="allow_user-button" class="btn btn-outline-light ms-3">
+							Allow
+						</button>
+					</div>
+				</div>
+
+				<span>* applies to any user</span>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="queue-tab" role="tabpanel" aria-labelledby="queue-tab-button" tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<div class="form-floating">
+					<input type="number" min="0" value="10" id="queuelimit-input" class="form-control"
+						aria-label="Queue limit" data-bs-toggle="tooltip" data-bs-title="0 to disable">
+					</input>
+
+					<label for="queuelimit-input">Queue limit</label>
+				</div>
+
+				<span>Tracks queue</span>
+
+				<div class="overflow-y-auto flex-fill" style="min-height: 20em;">
+					<div style="max-height: 0px;">
+						<table id="tracksqueue-table" class="table">
+							<thead id="tracksqueue-header" class="sticky-top">
+								<tr>
+									<th>Track</th>
+									<th>Remove</th>
+								</tr>
+							</thead>
+
+							<tbody id="tracksqueue-body" class="table-group-divider">
+
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="tts-tab" role="tabpanel" aria-labelledby="tts-tab-button" tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<div class="form-floating">
+					<select id="ttsvoice-select" class="form-select" aria-label="TTS Voice">
+					</select>
+
+					<label for="ttsvoice-select">TTS Voice</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" value="0" id="ttsspeed-input" class="form-control" aria-label="TTS Speed">
+					</input>
+
+					<label for="ttsspeed-input">TTS Speed</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" value="100" id="ttsvolume-input" class="form-control" aria-label="TTS Volume">
+					</input>
+
+					<label for="ttsvolume-input">TTS Volume</label>
+				</div>
+
+				<div class="form-floating input-group">
+					<input type="text" id="tts-input" class="form-control" aria-label="TTS Text">
+					</input>
+
+					<label for="tts-input">TTS Text</label>
+
+					<button id="tts-button" class="btn btn-outline-light ms-3">
+						Speak
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="settings-tab" role="tabpanel" aria-labelledby="settings-tab-button" tabindex="0">
+			<div class="d-flex flex-column h-100 gap-3">
+				<span>General</span>
+
+				<div class="form-check">
+					<input class="form-check-input" type="checkbox" id="darkmode-checkmark">
+
+					<label class="form-check-label" for="darkmode-checkmark">
+						Dark mode
+					</label>
+				</div>
+
+				<div class="form-check">
+					<input class="form-check-input" type="checkbox" id="animations-checkmark">
+
+					<label class="form-check-label" for="animations-checkmark">
+						Transition animations
+					</label>
+				</div>
+
+				<span>Audio</span>
+
+				<div class="form-floating">
+					<select id="device-select" class="form-select" aria-label="Audio output device">
+					</select>
+
+					<label for="device-select">Audio output device</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" min="0" value="44100" id="samplerate-input" class="form-control"
+						aria-label="Sample rate">
+					</input>
+
+					<label for="samplerate-input">Sample rate</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" min="0" value="100" id="globalvolume-input" class="form-control"
+						aria-label="Global volume (%)">
+					</input>
+
+					<label for="globalvolume-input">Global volume (%)</label>
+				</div>
+
+				<span>Downloader</span>
+
+				<div class="form-floating">
+					<input type="number" min="0" value="20" id="videosizelimit-input" class="form-control"
+						aria-label="Video size limit">
+					</input>
+
+					<label for="videosizelimit-input">Video size limit (MB)</label>
+				</div>
+
+				<div class="form-floating input-group">
+					<input type="text" id="ytdlpath-name" class="form-control" aria-label="YTDl path" readonly>
+					</input>
+
+					<label for="ytdlpath-name">Youtube-DL path</label>
+
+					<button id="ytdlpath-button" class="btn btn-outline-light ms-3">
+						Choose binary
+					</button>
+				</div>
+
+				<div class="form-floating input-group">
+					<input type="text" id="downloadsfolder-name" class="form-control" aria-label="Downloads folder"
+						readonly>
+					</input>
+
+					<label for="downloadsfolder-name">Downloads folder</label>
+
+					<button id="downloadsfolder-button" class="btn btn-outline-light ms-3" data-bs-toggle="tooltip"
+						data-bs-title="Must not include the audio directory">
+						Choose folder
+					</button>
+				</div>
+
+				<span>Watcher</span>
+
+				<div class="form-floating input-group">
+					<input type="text" id="log_input-name" class="form-control" aria-label="Watcher" readonly>
+					</input>
+
+					<label for="log_input-name">Log</label>
+
+					<button id="log_input-button" class="btn btn-outline-light ms-3" data-bs-toggle="tooltip"
+						data-bs-title="Cannot be the same as output file">
+						Choose file
+					</button>
+				</div>
+
+				<div class="form-floating">
+					<input type="text" value="\." id="separatorregex-input" class="form-control"
+						aria-label="Separator regex">
+					</input>
+
+					<label for="separatorregex-input">Separator regex</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="text" value="\(TEAM\) |\*DEAD\*\(TEAM\) |\(Spectator\) |\*DEAD\* |\*SPEC\* |\*COACH\* "
+						id="chatregex-input" class="form-control" aria-label="Chat regex">
+					</input>
+
+					<label for="chatregex-input">Chat regex</label>
+				</div>
+
+				<div class="form-check">
+					<input class="form-check-input" type="checkbox" id="log_input_timestamp-checkmark">
+
+					<label class="form-check-label" for="log_input_timestamp-checkmark">
+						Timestamped log input
+					</label>
+				</div>
+
+				<span>Commands list</span>
+
+				<div class="overflow-y-auto" style="max-height: 20em;">
+					<table id="commandslist-table" class="table">
+						<thead id="commandslist-header" class="sticky-top">
+							<tr>
+								<th>Command</th>
+								<th>Description</th>
+								<th>Restricted to admins</th>
+							</tr>
+						</thead>
+
+						<tbody id="commandslist-body" class="table-group-divider">
+
+						</tbody>
+					</table>
+				</div>
+
+				<span>TTS</span>
+
+				<dl>
+					<dt>
+						Windows:
+					</dt>
+
+					<dd>
+						Its advised to use the SysWow64 version of <code>cscript.exe</code>
+						to find all installed voices
+					</dd>
+
+					<dd>
+						You must use the <code>//b</code> argument when using <code>cscript.exe</code>
+					</dd>
+				</dl>
+
+				<p>
+					Reselect the binary to restart it
+				</p>
+
+				<div class="form-floating input-group">
+					<input type="text" id="ttspipe-name" class="form-control" aria-label="TTS pipe" readonly>
+					</input>
+
+					<label for="ttspipe-name">TTS Pipe</label>
+
+					<button id="ttspipe-button" class="btn btn-outline-light ms-3">
+						Choose binary
+					</button>
+				</div>
+
+				<div class="form-floating">
+					<input type="text" id="ttspipeargs-name" class="form-control" aria-label="TTS pipe arguments">
+					</input>
+
+					<label for="ttspipeargs-name">Pipe Arguments</label>
+				</div>
+
+				<div class="form-floating input-group">
+					<input type="text" id="ttsfile-name" class="form-control" aria-label="TTS script" readonly>
+					</input>
+
+					<label for="ttsfile-name">TTS Script</label>
+
+					<button id="ttsfile-button" class="btn btn-outline-light ms-3">
+						Choose file
+					</button>
+				</div>
+
+				<span>Limiter</span>
+
+				<div class="form-floating">
+					<input type="number" value="0" id="limiterthreshold-input" class="form-control"
+						aria-label="Limiter threshold" data-bs-toggle="tooltip" data-bs-title="0 to disable">
+					</input>
+
+					<label for="limiterthreshold-input">Threshold value (+/- dB)</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" value="25.00" id="attacktime-input" class="form-control"
+						aria-label="Attack time (ms)">
+					</input>
+
+					<label for="attacktime-input">Attack time (ms)</label>
+				</div>
+
+				<div class="form-floating">
+					<input type="number" value="50.00" id="releasetime-input" class="form-control"
+						aria-label="Release time (ms)">
+					</input>
+
+					<label for="releasetime-input">Release time (ms)</label>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div id="footer" class="pb-2">
+
+	</div>
+
+	<script>
+		// VSCode sucks and can't provide jQuery docs in .js files
+		// without using node.js
+
+		// Aliases
+
+		"use strict";
+
+		const tabContent = $("#tabcontent")[0]
+
+		// Log output tab
+
+		const setlogout_button = $("#set_log_output-button")[0]
+		const clearlogout_button = $("#clear_log_output-button")[0]
+		const logout_entry = $("#log_output-entry")[0]
+		const logout_filename = $("#log_output-file")[0]
+
+		// Audio tab
+
+		const audiofolder_name = $("#audiofolder-name")[0]
+		const audiofolder_button = $("#audiofolder-button")[0]
+
+		const fileslist_table = $("#fileslist-table")[0]
+		const fileslist_body = $("#fileslist-body")[0]
+
+		// Downloads tab
+
+		const videourl_input = $("#videourl-input")[0]
+		const downloadvideo_button = $("#downloadvideo-button")[0]
+
+		const videofile_input = $("#videofile-input")[0]
+		const playafterdownload_checkmark = $("#playafterdownload-checkmark")[0]
+
+		// Watcher tab
+
+		const blockedlist_table = $("#blockedlist-table")[0]
+		const blockedlist_body = $("#blockedlist-body")[0]
+
+		const allowedlist_table = $("#allowedlist-table")[0]
+		const allowedlist_body = $("#allowedlist-body")[0]
+
+		const blockuser_name = $("#block_user-name")[0]
+		const blockuser_button = $("#block_user-button")[0]
+
+		const allowuser_name = $("#allow_user-name")[0]
+		const allowuser_button = $("#allow_user-button")[0]
+
+		// Queue tab
+
+		const queuelimit_input = $("#queuelimit-input")[0]
+
+		const tracksqueue_table = $("#tracksqueue-table")[0]
+		const tracksqueue_body = $("#tracksqueue-body")[0]
+
+		// TTS tab
+
+		const ttsvoice_select = $("#ttsvoice-select")[0]
+		const ttsspeed_input = $("#ttsspeed-input")[0]
+		const ttsvolume_input = $("#ttsvolume-input")[0]
+		const tts_input = $("#tts-input")[0]
+		const tts_button = $("#tts-button")[0]
+
+		// Settings tab
+
+		const darkmode_checkmark = $("#darkmode-checkmark")[0]
+		const animations_checkmark = $("#animations-checkmark")[0]
+
+		const device_select = $("#device-select")[0]
+		const samplerate_input = $("#samplerate-input")[0]
+		const globalvolume_input = $("#globalvolume-input")[0]
+
+		const videosizelimit_input = $("#videosizelimit-input")[0]
+		const ytdlpath_name = $("#ytdlpath-name")[0]
+		const ytdlpath_button = $("#ytdlpath-button")[0]
+		const downloadsfolder_name = $("#downloadsfolder-name")[0]
+		const downloadsfolder_button = $("#downloadsfolder-button")[0]
+
+		const loginput_name = $("#log_input-name")[0]
+		const loginput_button = $("#log_input-button")[0]
+		const separatorregex_input = $("#separatorregex-input")[0]
+		const chatregex_input = $("#chatregex-input")[0]
+		const loginputtimestamp_checkmark = $("#log_input_timestamp-checkmark")[0]
+		const commandslist_table = $("#commandslist-table")[0]
+		const commandslist_body = $("#commandslist-body")[0]
+
+		const ttspipe_name = $("#ttspipe-name")[0]
+		const ttspipe_button = $("#ttspipe-button")[0]
+		const ttspipeargs_name = $("#ttspipeargs-name")[0]
+		const ttsfile_name = $("#ttsfile-name")[0]
+		const ttsfile_button = $("#ttsfile-button")[0]
+
+		const limiterthreshold_input = $("#limiterthreshold-input")[0]
+		const attacktime_input = $("#attacktime-input")[0]
+		const releasetime_input = $("#releasetime-input")[0]
+
+		// Code
+
+		darkmode_checkmark.addEventListener("change", function (event) {
+			let state = event.target.checked
+
+			setDarkMode(state)
+			call_setDarkMode(state)
+		})
+
+		animations_checkmark.addEventListener("change", function (event) {
+			let state = event.target.checked
+
+			setAnimations(state)
+			call_setAnimations(state)
+		})
+
+		clearlogout_button.addEventListener("click", function (event) {
+			call_clearLogOutFile()
+		})
+
+		setlogout_button.addEventListener("click", function (event) {
+			call_selectLogOutFile()
+		})
+
+		audiofolder_button.addEventListener("click", function (event) {
+			call_selectAudioDir()
+		})
+
+		device_select.addEventListener("change", function (event) {
+			call_setDevice(event.target.value)
+		})
+
+		samplerate_input.addEventListener("change", function (event) {
+			call_setSampleRate(event.target.value)
+		})
+
+		globalvolume_input.addEventListener("change", function (event) {
+			call_setGlobalVolume(event.target.value)
+		})
+
+		downloadsfolder_button.addEventListener("click", function (event) {
+			call_selectDownloadsDir()
+		})
+
+		ytdlpath_button.addEventListener("click", function (event) {
+			call_selectYTDLBinary()
+		})
+
+		videosizelimit_input.addEventListener("change", function (event) {
+			call_setVideoSizeLimit(event.target.value)
+		})
+
+		playafterdownload_checkmark.addEventListener("change", function (event) {
+			call_setPlayAfter(event.target.checked)
+		})
+
+		downloadvideo_button.addEventListener("click", function (event) {
+			call_downloadVideo(videourl_input.value, videofile_input.value)
+		})
+
+		loginput_button.addEventListener("click", function (event) {
+			call_selectWatchFile()
+		})
+
+		loginputtimestamp_checkmark.addEventListener("change", function (event) {
+			call_setTimestampedLog(event.target.checked)
+		})
+
+		chatregex_input.addEventListener("change", function (event) {
+			call_setChatRegex(event.target.value)
+		})
+
+		separatorregex_input.addEventListener("change", function (event) {
+			call_setSeparatorRegex(event.target.value)
+		})
+
+		blockuser_button.addEventListener("click", function (event) {
+			addUser(blockuser_name.value, 0)
+			call_addUser(blockuser_name.value, 0)
+		})
+
+		allowuser_button.addEventListener("click", function (event) {
+			addUser(allowuser_name.value, 1)
+			call_addUser(allowuser_name.value, 1)
+		})
+
+		queuelimit_input.addEventListener("change", function (event) {
+			call_setQueueLimit(event.target.value)
+		})
+
+		ttspipeargs_name.addEventListener("change", function (event) {
+			call_setTTSArgs(event.target.value)
+		})
+
+		ttspipe_button.addEventListener("click", function (event) {
+			call_selectTTSBinary()
+		})
+
+		ttsfile_button.addEventListener("click", function (event) {
+			call_selectTTSFile()
+		})
+
+		ttsspeed_input.addEventListener("change", function (event) {
+			call_setTTSRate(event.target.value)
+		})
+
+		ttsvolume_input.addEventListener("change", function (event) {
+			call_setTTSVolume(event.target.value)
+		})
+
+		ttsvoice_select.addEventListener("change", function (event) {
+			call_setTTSVoice(event.target.value)
+		})
+
+		tts_button.addEventListener("click", function (event) {
+			call_speakTTS(tts_input.value)
+		})
+
+		limiterthreshold_input.addEventListener("change", function (event) {
+			call_setThreshold(event.target.value)
+		})
+
+		attacktime_input.addEventListener("change", function (event) {
+			call_setAttackTime(event.target.value)
+		})
+
+		releasetime_input.addEventListener("change", function (event) {
+			call_setReleaseTime(event.target.value)
+		})
+
+		function clearVoices() {
+			ttsvoice_select.innerHTML = ``
+		}
+
+		function addVoice(id, name, selected) {
+			let newVoice = document.createElement("option")
+			newVoice.value = id
+			newVoice.innerText = name
+			newVoice.selected = selected
+
+			ttsvoice_select.append(newVoice)
+		}
+
+		let queuedList = []
+
+		function addQueued(path) {
+			let newRow = document.createElement("tr")
+
+			let cellName = document.createElement("td")
+			let baseName = path.split(/[\\/]/).pop()
+			cellName.innerText = baseName.slice(0, baseName.indexOf("."))
+
+			newRow.append(cellName)
+
+			let cellAction = document.createElement("td")
+
+			let actionButton = document.createElement("button")
+			actionButton.classList.add("btn")
+			actionButton.classList.toggle(document.body.dataset.bsTheme == "dark" ? "btn-outline-light" : "btn-outline-dark")
+			actionButton.innerText = "Remove"
+			actionButton.addEventListener("click", function (event) {
+				tracksqueue_body.removeChild(newRow)
+
+				let elem = undefined
+
+				for (let index = 0; index < queuedList.length; index++) {
+					elem = queuedList[index]
+
+					if (elem != newRow) continue
+
+					call_removeQueued(index)
+					queuedList = queuedList.filter(elem => elem != newRow)
+
+					break
+				}
+			})
+			cellAction.append(actionButton)
+
+			newRow.append(cellAction)
+
+			queuedList.push(newRow)
+
+			tracksqueue_body.append(newRow)
+		}
+
+		function removeQueued(row) {
+			tracksqueue_body.removeChild(row)
+
+			let elem = undefined
+
+			for (let index = 0; index < queuedList.length; index++) {
+				elem = queuedList[index]
+
+				if (elem != row) continue
+
+				queuedList = queuedList.filter(elem => elem != row)
+
+				break
+			}
+		}
+
+		const usersList = {}
+
+		function addUser(name, blocked) {
+			if (name.length < 1) return
+
+			if (usersList[name]) {
+				removeUser(name)
+			}
+
+			let newRow = document.createElement("tr")
+
+			let cellName = document.createElement("td")
+			cellName.innerText = name
+
+			newRow.append(cellName)
+
+			let cellAction = document.createElement("td")
+
+			let actionButton = document.createElement("button")
+			actionButton.classList.add("btn")
+			actionButton.classList.toggle(document.body.dataset.bsTheme == "dark" ? "btn-outline-light" : "btn-outline-dark")
+			actionButton.innerText = "Remove"
+			actionButton.addEventListener("click", function (event) {
+				removeUser(name)
+				call_removeUser(name)
+			})
+			cellAction.append(actionButton)
+
+			newRow.append(cellAction)
+
+			usersList[name] = {
+				blocked: blocked,
+				row: newRow
+			}
+
+			if (!blocked) {
+				blockedlist_body.append(newRow)
+			} else {
+				allowedlist_body.append(newRow)
+			}
+		}
+
+		function removeUser(name) {
+			if (name.length < 1) return
+
+			const user = usersList[name]
+
+			if (!user.blocked) {
+				blockedlist_body.removeChild(user.row)
+			} else {
+				allowedlist_body.removeChild(user.row)
+			}
+
+			delete usersList[name]
+		}
+
+		function addCommand(name, description, allowedOnly) {
+			let newRow = document.createElement("tr")
+
+			let cellName = document.createElement("td")
+			cellName.innerText = name
+
+			newRow.append(cellName)
+
+			let cellDesc = document.createElement("td")
+			cellDesc.innerText = description
+
+			newRow.append(cellDesc)
+
+			let cellAllowed = document.createElement("td")
+
+			let allowedCheck = document.createElement("input")
+			allowedCheck.type = "checkbox"
+			allowedCheck.id = "cmdcheck_" + name
+			allowedCheck.classList.add("form-check-input")
+			allowedCheck.checked = allowedOnly
+			allowedCheck.addEventListener("change", function (event) {
+				call_setAllowed(name, event.target.checked)
+			})
+			cellAllowed.append(allowedCheck)
+
+			newRow.append(cellAllowed)
+
+			commandslist_body.append(newRow)
+		}
+
+		function addDevice(id, name, selected) {
+			let newDevice = document.createElement("option")
+			newDevice.value = id
+			newDevice.innerText = name
+			newDevice.selected = selected
+
+			device_select.append(newDevice)
+		}
+
+		function setDarkMode(state) {
+			darkmode_checkmark.checked = state
+
+			document.body.dataset.bsTheme = state ? "dark" : "light"
+
+			$(".btn-outline-light, .btn-outline-dark").each((id, elem) => {
+				elem.classList.toggle("btn-outline-light", state)
+				elem.classList.toggle("btn-outline-dark", !state)
+			})
+		}
+
+		function setAnimations(state) {
+			animations_checkmark.checked = state
+
+			for (const tab of tabContent.children) {
+				tab.classList.toggle("fade", state)
+			}
+		}
+
+		const tracksList = []
+		let bindingRow = -1
+
+		function addTrack(id, path, volume, solo, binding) {
+			let newRow = document.createElement("tr")
+
+			let cellID = document.createElement("td")
+			cellID.innerText = id
+
+			newRow.append(cellID)
+
+			let splitter = path.startsWith(audiofolder_name.value) ? audiofolder_name.value : downloadsfolder_name.value
+
+			let baseName = path.slice(splitter.length).split(/[\\/]/).filter((part) => part.length != 0).join("/")
+			let dotPos = baseName.indexOf(".")
+
+			let trackName = baseName.slice(0, dotPos)
+			let trackExt = baseName.slice(dotPos)
+
+			let cellName = document.createElement("td")
+			cellName.innerText = trackName
+
+			newRow.append(cellName)
+
+			let cellExt = document.createElement("td")
+			cellExt.innerText = trackExt
+
+			newRow.append(cellExt)
+
+			let cellVolume = document.createElement("td")
+
+			let volumeInput = document.createElement("input")
+			volumeInput.type = "number"
+			volumeInput.id = "volume_" + id
+			volumeInput.classList.add("form-control")
+			volumeInput.value = volume
+			volumeInput.addEventListener("change", function (event) {
+				call_setVolume(id, event.target.value)
+			})
+			cellVolume.append(volumeInput)
+
+			newRow.append(cellVolume)
+
+			let cellBinding = document.createElement("td")
+
+			let bindingButton = document.createElement("button")
+			bindingButton.classList.add("btn")
+			bindingButton.classList.toggle(document.body.dataset.bsTheme == "dark" ? "btn-outline-light" : "btn-outline-dark")
+			bindingButton.innerText = binding
+			bindingButton.addEventListener("click", function (event) {
+				if (bindingRow != -1) {
+					tracksList[bindingRow].bindingButton.innerText = tracksList[bindingRow].binding
+				}
+
+				bindingRow = id
+
+				event.target.innerText = "Binding to..."
+
+				call_setBinding(id)
+			})
+			cellBinding.append(bindingButton)
+
+			newRow.append(cellBinding)
+
+			let cellSolo = document.createElement("td")
+
+			let soloCheckmark = document.createElement("input")
+			soloCheckmark.type = "checkbox"
+			soloCheckmark.id = "solo_" + id
+			soloCheckmark.classList.add("form-check-input")
+			soloCheckmark.checked = solo
+			soloCheckmark.addEventListener("change", function (event) {
+				call_setSolo(id, event.target.checked)
+			})
+			cellSolo.append(soloCheckmark)
+
+			newRow.append(cellSolo)
+
+			let cellPreview = document.createElement("td")
+
+			let previewButton = document.createElement("button")
+			previewButton.classList.add("btn")
+			previewButton.classList.toggle(document.body.dataset.bsTheme == "dark" ? "btn-outline-light" : "btn-outline-dark")
+			previewButton.innerText = "Preview"
+			previewButton.addEventListener("click", function (event) {
+				call_play(id, -1, true)
+			})
+			cellPreview.append(previewButton)
+
+			newRow.append(cellPreview)
+
+			const newTrack = {
+				id: id,
+				name: trackName,
+				binding: binding,
+				bindingButton: bindingButton,
+				soloCheckmark: soloCheckmark,
+				volumeInput: volumeInput,
+			}
+			tracksList.push(newTrack)
+
+			fileslist_body.append(newRow)
+		}
+
+		function updateTrackBinding(id, binding) {
+			tracksList[id].binding = binding
+			tracksList[id].bindingButton.innerText = binding
+
+			bindingRow = -1
+		}
+
+		function clearTracks() {
+			fileslist_body.innerHTML = ``
+		}
+	</script>
+</body>
+
+</html>

@@ -1,0 +1,8 @@
+# https://forums.gentoo.org/viewtopic-t-818847-start-0.html
+#
+# Put this in /etc/udev/rules.d or any other rules folder
+# Find devices using : udevadm info -a -p  $(udevadm info -q path -n /dev/input/event1)
+# Search all events until you find the correct one corresponding to your device and
+# optionally add an identifier for your device : ATTRS{identifier}==...
+
+KERNEL=="event*", SUBSYSTEM=="input", TAG+="uaccess"

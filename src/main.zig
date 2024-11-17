@@ -2672,8 +2672,10 @@ const WatchTabInterface = struct {
 
         if (stat.size <= self.previousPos) return;
 
-        const newLines = self.file.?.readToEndAlloc(Ctx.allocator, stat.size - self.previousPos) catch unreachable;
+        const newLines = Ctx.allocator.alloc(u8, stat.size - self.previousPos) catch unreachable;
         defer Ctx.allocator.free(newLines);
+
+        _ = self.file.?.read(newLines) catch unreachable;
 
         var splitLines = std.mem.splitAny(u8, newLines, Constants.newline);
 

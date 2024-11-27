@@ -485,7 +485,9 @@ const Ctx = struct {
     }
 
     fn kbHookCallback(event: [*c]c.uiohook_event, _: ?*anyopaque) callconv(.C) void {
-        if ((event.*.type != c.EVENT_KEY_PRESSED) or (Ctx.tabs.audio.tracksList.items.len == 0)) return;
+        if ((event.*.type != c.EVENT_KEY_PRESSED) or
+            (Ctx.tabs.audio.tracksList.items.len == 0) or
+            Ctx.mustExit) return;
 
         var keyCode = event.*.data.keyboard.keycode;
 
@@ -1454,13 +1456,11 @@ const AudioTabInterface = struct {
         self.directory = std.fs.openDirAbsolute(Ctx.settings.audioDirectory.?, .{
             .iterate = true,
         }) catch |err| {
-            if (Ctx.settings.audioDirectory != null) {
-                Ctx.allocator.free(Ctx.settings.audioDirectory.?);
-                Ctx.settings.audioDirectory = null;
-                jsCode("audiofolder_name.innerText = ``", .{});
+            Ctx.allocator.free(Ctx.settings.audioDirectory.?);
+            Ctx.settings.audioDirectory = null;
+            jsCode("audiofolder_name.innerText = ``", .{});
 
-                Ctx.tabs.settings.saveDebounced.call();
-            }
+            Ctx.tabs.settings.saveDebounced.call();
 
             return err;
         };

@@ -971,9 +971,19 @@ const LogTabInterface = struct {
             }
         }
 
-        self.file = try std.fs.openFileAbsolute(path.?, .{
+        self.file = std.fs.openFileAbsolute(path.?, .{
             .mode = .read_write,
-        });
+        }) catch |err| {
+            if (Ctx.settings.logOutFile != null) {
+                Ctx.allocator.free(Ctx.settings.logOutFile.?);
+                Ctx.settings.logOutFile = null;
+                jsCode("logout_filename.innerText = ``", .{});
+
+                Ctx.tabs.settings.saveDebounced.call();
+            }
+
+            return err;
+        };
 
         if (Ctx.settings.logOutFile == null) {
             Ctx.settings.logOutFile = std.fmt.allocPrint(Ctx.allocator, "{s}", .{path.?}) catch unreachable;
@@ -1441,9 +1451,19 @@ const AudioTabInterface = struct {
             dir.close();
         }
 
-        self.directory = try std.fs.openDirAbsolute(Ctx.settings.audioDirectory.?, .{
+        self.directory = std.fs.openDirAbsolute(Ctx.settings.audioDirectory.?, .{
             .iterate = true,
-        });
+        }) catch |err| {
+            if (Ctx.settings.audioDirectory != null) {
+                Ctx.allocator.free(Ctx.settings.audioDirectory.?);
+                Ctx.settings.audioDirectory = null;
+                jsCode("audiofolder_name.innerText = ``", .{});
+
+                Ctx.tabs.settings.saveDebounced.call();
+            }
+
+            return err;
+        };
 
         const stat = self.directory.?.stat() catch unreachable;
         self.previousMTime = stat.mtime;
@@ -1462,9 +1482,19 @@ const AudioTabInterface = struct {
                 return Errors.DownloadDirIsTopLevel;
             }
 
-            var dlDir = try std.fs.openDirAbsolute(path, .{
+            var dlDir = std.fs.openDirAbsolute(path, .{
                 .iterate = true,
-            });
+            }) catch |err| {
+                if (Ctx.settings.downloadsFolder != null) {
+                    Ctx.allocator.free(Ctx.settings.downloadsFolder.?);
+                    Ctx.settings.downloadsFolder = null;
+                    jsCode("downloadsfolder_name.innerText = ``", .{});
+
+                    Ctx.tabs.settings.saveDebounced.call();
+                }
+
+                return err;
+            };
             defer dlDir.close();
 
             var dlWalker = try dlDir.walk(Ctx.allocator);
@@ -2053,7 +2083,17 @@ const DownloaderTabInterface = struct {
             return;
         }
 
-        var dir = try std.fs.openDirAbsolute(path.?, .{});
+        var dir = std.fs.openDirAbsolute(path.?, .{}) catch |err| {
+            if (Ctx.settings.downloadsFolder != null) {
+                Ctx.allocator.free(Ctx.settings.downloadsFolder.?);
+                Ctx.settings.downloadsFolder = null;
+                jsCode("downloadsfolder_name.innerText = ``", .{});
+
+                Ctx.tabs.settings.saveDebounced.call();
+            }
+
+            return err;
+        };
         dir.close();
 
         if (Ctx.settings.downloadsFolder != null) {
@@ -2709,7 +2749,17 @@ const WatchTabInterface = struct {
             }
         }
 
-        self.file = try std.fs.openFileAbsolute(path.?, .{});
+        self.file = std.fs.openFileAbsolute(path.?, .{}) catch |err| {
+            if (Ctx.settings.watchFile != null) {
+                Ctx.allocator.free(Ctx.settings.watchFile.?);
+                Ctx.settings.watchFile = null;
+                jsCode("loginput_name.innerText = ``", .{});
+
+                Ctx.tabs.settings.saveDebounced.call();
+            }
+
+            return err;
+        };
 
         if (Ctx.settings.watchFile == null) {
             Ctx.settings.watchFile = std.fmt.allocPrint(Ctx.allocator, "{s}", .{path.?}) catch unreachable;

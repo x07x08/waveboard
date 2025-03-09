@@ -5,7 +5,7 @@
 
   https://webui.me
   https://github.com/webui-dev/webui
-  Copyright (c) 2020-2024 Hassan Draga.
+  Copyright (c) 2020-2025 Hassan Draga.
   Licensed under MIT License.
   All rights reserved.
   Canada.
@@ -170,10 +170,35 @@ class WebuiBridge {
 		}
 	}
 	#freezeUi() {
-		document.body.style.filter = 'contrast(1%)';
+		setTimeout(() => {
+			if (!this.#wsIsConnected()) {
+				if (document.getElementById('webui-error-connection-lost')) return;
+				const div = document.createElement('div');
+				div.id = 'webui-error-connection-lost';
+				Object.assign(div.style, {
+					position: 'relative',
+					top: '0',
+					left: '0',
+					width: '100%',
+					backgroundColor: '#ff4d4d',
+					color: '#fff',
+					textAlign: 'center',
+					padding: '2px 0',
+					fontFamily: 'Arial, sans-serif',
+					fontSize: '14px',
+					zIndex: '1000',
+					lineHeight: '1'
+				});
+				div.innerText = 'WebUI Error: Connection with the backend is lost.';
+				document.body.insertBefore(div, document.body.firstChild);
+			}
+		}, 1000);
 	}
 	#unfreezeUI() {
-		document.body.style.filter = 'contrast(100%)';
+		const div = document.getElementById('webui-error-connection-lost');
+		if (div) {
+			div.remove();
+		}
 	}
 	#isTextBasedCommand(cmd: number): Boolean {
 		if (cmd !== this.#CMD_SEND_RAW) return true;
@@ -245,17 +270,12 @@ class WebuiBridge {
 		}
 	};
 	#clicksListener() {
-		Object.keys(window).forEach((key) => {
-			if (/^on(click)/.test(key)) {
-				globalThis.addEventListener(key.slice(2), (event) => {
-					if (!(event.target instanceof HTMLElement)) return;
-					if (this.#AllEvents ||
-						((event.target.id !== '') && 
-						(this.#bindsList.includes(event.target?.id)))
-					) {
-						this.#sendClick(event.target.id);
-					}
-				});
+		document.querySelectorAll<HTMLElement>("[id]").forEach(e => {
+			if (this.#AllEvents || ((e.id !== '') && (this.#bindsList.includes(e.id)))) {
+				if (e.id && !e.dataset.webui_click_is_set) {
+					e.dataset.webui_click_is_set = "true";
+					e.addEventListener("click", () => this.#sendClick(e.id));
+				}
 			}
 		});
 	}
@@ -413,10 +433,11 @@ class WebuiBridge {
 			if (bind.trim()) {
 				const fn = bind;
 				if (fn.trim()) {
-					if (fn !== '_webui_core_api') {
-						this[fn] = (...args: DataTypes[]) => this.call(fn, ...args);
+					if (fn !== '__webui_core_api__') {
 						if (typeof (window as any)[fn] === 'undefined') {
+							this[fn] = (...args: DataTypes[]) => this.call(fn, ...args);
 							(window as any)[fn] = (...args: string[]) => this.call(fn, ...args);
+							if (this.#log) console.log(`WebUI -> Binding backend function [${fn}]`);
 						}
 					}
 				}
@@ -491,7 +512,7 @@ class WebuiBridge {
 		return ((this.#ws) && (this.#ws.readyState === WebSocket.OPEN));
 	}
 	#wsConnect(): void {
-		if (this.#ws) {
+		if (this.#wsIsConnected()) {
 			this.#ws.close();
 		}
 		this.#TokenAccepted = false;
@@ -753,8 +774,10 @@ class WebuiBridge {
 		if (!this.#wsIsConnected()) return Promise.reject(new Error('WebSocket is not connected'));
 
 		// Check binding list
-		if (!this.#AllEvents && !this.#bindsList.includes(`${fn}`))
-			return Promise.reject(new ReferenceError(`No binding was found for "${fn}"`));
+		if (fn !== '__webui_core_api__') {
+			if (!this.#AllEvents && !this.#bindsList.includes(`${fn}`))
+				return Promise.reject(new ReferenceError(`No binding was found for "${fn}"`));
+		}
 
 		// Call backend and wait for response
 		if (this.#log) console.log(`WebUI -> Calling [${fn}(...)]`);
@@ -824,6 +847,17 @@ class WebuiBridge {
 		if (this.#log) console.log(`Core Response: [${response}]`);
 		return response;
 	}
+	/**
+	 * When binding all events on the backend, WebUI blocks all navigation events
+	 * and sends them to the backend. This API allows you to control that behavior.
+	 *
+	 * @param status - Boolean `True` means WebUI will allow navigations
+	 * @example - webui.allowNavigation(true); // Allow navigation
+	 * window.location.replace('www.test.com'); // This will now proceed as usual
+	 */
+	allowNavigation(status: boolean): void {
+        this.#allowNavigation = status;
+    }
 }
 // Export
 type webui = WebuiBridge;

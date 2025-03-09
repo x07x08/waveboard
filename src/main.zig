@@ -9,10 +9,9 @@ const rgx = @import("regex");
 
 const win = if (native_os == .windows) struct {
     const WINAPI = std.os.windows.WINAPI;
-    extern "c" fn signal(sig: c_int, func: *const fn (c_int, c_int) callconv(WINAPI) void) callconv(.C) *anyopaque;
+    extern "c" fn signal(sig: c_int, func: *const fn (c_int, c_int) callconv(WINAPI) void) callconv(.c) *anyopaque;
 } else {};
 
-//const win32 = @import("win32");
 const c = @cImport({
     @cInclude("miniaudio/miniaudiostatic.h");
     @cInclude("uiohook.h");
@@ -1068,7 +1067,7 @@ const AudioTrackSave = struct {
 
     fn isDefault(self: *AudioTrackSave) bool {
         inline for (@typeInfo(AudioTrackSave).@"struct".fields) |field| {
-            const defVal: *const field.type = @alignCast(@ptrCast(field.default_value.?));
+            const defVal: *const field.type = @alignCast(@ptrCast(field.default_value_ptr.?));
 
             if (defVal.* != @field(self, field.name)) {
                 return false;
@@ -1635,14 +1634,14 @@ const AudioTabInterface = struct {
                         newSound,
                         @intFromFloat(@as(f64, @floatFromInt(pos)) /
                             (@as(f64, @floatFromInt(oldSampleRate)) /
-                            @as(f64, @floatFromInt(newSampleRate)))),
+                                @as(f64, @floatFromInt(newSampleRate)))),
                     );
                 } else {
                     _ = c.ma_sound_seek_to_pcm_frame(
                         newSound,
                         @intFromFloat(@as(f64, @floatFromInt(pos)) *
                             (@as(f64, @floatFromInt(newSampleRate)) /
-                            @as(f64, @floatFromInt(oldSampleRate)))),
+                                @as(f64, @floatFromInt(oldSampleRate)))),
                     );
                 }
 

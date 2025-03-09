@@ -2,7 +2,7 @@
   WebUI Library
   https://webui.me
   https://github.com/webui-dev/webui
-  Copyright (c) 2020-2024 Hassan Draga.
+  Copyright (c) 2020-2025 Hassan Draga.
   Licensed under MIT License.
   All rights reserved.
   Canada.
@@ -90,7 +90,7 @@ namespace webui {
             // ------ Event methods `e->xxx()` ------
 
             // Get how many arguments there are in an event.
-            size_t get_count(size_t index = 0) { 
+            size_t get_count(size_t index = 0) {
                 return webui_get_count(this);
             }
 
@@ -125,9 +125,9 @@ namespace webui {
             }
 
             // Run JavaScript without waiting for the response. Single client.
-            void script_client(const std::string_view script, unsigned int timeout, 
+            bool script_client(const std::string_view script, unsigned int timeout,
                             char* buffer, size_t buffer_length) {
-                webui_script_client(this, script.data(), timeout, buffer, buffer_length);
+                return webui_script_client(this, script.data(), timeout, buffer, buffer_length);
             }
 
             // Run JavaScript without waiting for the response. Single client.
@@ -172,7 +172,12 @@ namespace webui {
 
             // Same as `show()` but for a specific single client
             bool show_client(const std::string_view s) {
-                webui_show_client(this, s.data());
+                return webui_show_client(this, s.data());
+            }
+
+            // Get user data that is set using `set_context()`
+            void* get_context() {
+                return webui_get_context(this);
             }
 
             // Extras
@@ -221,6 +226,11 @@ namespace webui {
         // Set the window in Kiosk mode (Full screen)
         void set_kiosk(bool status) const {
             webui_set_kiosk(webui_window, status);
+        }
+
+        // Add user-defined command line parameters
+        void set_custom_parameters(char *params) const {
+            webui_set_custom_parameters(webui_window, params);
         }
 
         // Set the window with high-contrast support. Useful when you want to build a better high-contrast theme with CSS.
@@ -273,10 +283,10 @@ namespace webui {
             return webui_get_port(webui_window);
         }
 
-        // Set a custom web-server network port to be used by WebUI. This can be useful to determine the HTTP 
+        // Set a custom web-server network port to be used by WebUI. This can be useful to determine the HTTP
         // link of `webui.js` in case you are trying to use WebUI with an external web-server like NGNIX
-        void set_port(size_t port) const {
-            webui_set_port(webui_window, port);
+        bool set_port(size_t port) const {
+            return webui_set_port(webui_window, port);
         }
 
         // Set window position
@@ -341,7 +351,7 @@ namespace webui {
             webui_navigate(webui_window, url.data());
         }
 
-        // Control if UI events coming from this window should be processed one at a time in a 
+        // Control if UI events coming from this window should be processed one at a time in a
         // single blocking thread `True`, or process every event in a new non-blocking thread `False`.
         void set_event_blocking(bool status) const {
             webui_set_event_blocking(webui_window, status);
@@ -359,7 +369,7 @@ namespace webui {
 
         // Same as `webui_show()`. But start only the web server and return the URL. No window will be shown.
         std::string_view start_server(const std::string_view content) const {
-            webui_start_server(webui_window, content.data());
+            return std::string_view{webui_start_server(webui_window, content.data())};
         }
 
         // Quickly run a JavaScript (no response waiting).
@@ -368,7 +378,7 @@ namespace webui {
         }
 
         // Run a JavaScript, and get the response back (Make sure your local buffer can hold the response).
-        bool script(const std::string_view script, unsigned int timeout, 
+        bool script(const std::string_view script, unsigned int timeout,
                     char* buffer, size_t buffer_length) const {
             return webui_script(webui_window, script.data(), timeout, buffer, buffer_length);
         }
@@ -376,6 +386,18 @@ namespace webui {
         // Chose between Deno and Nodejs runtime for .js and .ts files.
         void set_runtime(unsigned int runtime) const {
             webui_set_runtime(webui_window, runtime);
+        }
+
+        // Use this API after using `bind()` to add any user data to it that can be
+        // read later using `get_context()`.
+        void set_context(const std::string_view element, void* context) const {
+            webui_set_context(webui_window, element.data(), context);
+        }
+
+        // Gets Win32 window `HWND`. More reliable with WebView than web browser 
+        // window, as browser PIDs may change on launch.
+        void* win32_get_hwnd() const {
+            return webui_win32_get_hwnd(webui_window);
         }
     };
 
@@ -438,9 +460,9 @@ namespace webui {
 
     // Set the SSL/TLS certificate and the private key content, both in PEM format.
     // This works only with `webui-2-secure` library. If set empty WebUI will generate a self-signed certificate.
-    inline void set_tls_certificate(const std::string_view certificate_pem, 
+    inline bool set_tls_certificate(const std::string_view certificate_pem,
                                     const std::string_view private_key_pem) {
-        webui_set_tls_certificate(certificate_pem.data(), private_key_pem.data());
+        return webui_set_tls_certificate(certificate_pem.data(), private_key_pem.data());
     }
 
     // Safely free a buffer allocated by WebUI, for example when using webui_encode().
@@ -476,6 +498,11 @@ namespace webui {
     // Check if the app is still running.
     inline bool is_app_running() {
         return webui_interface_is_app_running();
+    }
+
+    // Copy raw data.
+    inline void memcpy(void* dest, const void* src, size_t count) {
+        webui_memcpy(dest, const_cast<void*>(src), count);
     }
 
 } // namespace webui

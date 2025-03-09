@@ -2,7 +2,7 @@
   WebUI Library
   https://webui.me
   https://github.com/webui-dev/webui
-  Copyright (c) 2020-2024 Hassan Draga.
+  Copyright (c) 2020-2025 Hassan Draga.
   Licensed under MIT License.
   All rights reserved.
   Canada.
@@ -74,9 +74,9 @@
 #define WEBUI_PROTOCOL_ID    (5)     // Protocol byte position: ID (2 Bytes)
 #define WEBUI_PROTOCOL_CMD   (7)     // Protocol byte position: Command (1 Byte)
 #define WEBUI_PROTOCOL_DATA  (8)     // Protocol byte position: Data (n Byte)
-#define WEBUI_MUTEX_NONE     (0)     // Check boolen mutex without update
-#define WEBUI_MUTEX_TRUE     (1)     // Check boolen mutex and update to true
-#define WEBUI_MUTEX_FALSE    (2)     // Check boolen mutex and update to false
+#define WEBUI_MUTEX_GET_STATUS  (0)  // Check boolen mutex without update
+#define WEBUI_MUTEX_SET_TRUE    (1)  // Update boolen mutex to true
+#define WEBUI_MUTEX_SET_FALSE   (2)  // Update boolen mutex false
 #define WEBUI_WS_DATA        (1)     // Internal WS Event (Data received)
 #define WEBUI_WS_OPEN        (2)     // Internal WS Event (New connection)
 #define WEBUI_WS_CLOSE       (3)     // Internal WS Event (Connection close)
@@ -163,10 +163,15 @@ typedef struct _webui_timer_t {
 
 // Event data
 typedef struct webui_event_inf_t {
+    // Client
+    struct mg_connection* client;
+    size_t connection_id;
+    // Args and Response
     char* event_data[WEBUI_MAX_ARG + 1]; // Event data (string | num | bool | raw)
     size_t event_size[WEBUI_MAX_ARG + 1]; // Event data size (in bytes)
     char* response; // Event response (string)
     size_t count; // Event arguments count
+    bool done;
 } webui_event_inf_t;
 
 // WebView
@@ -197,25 +202,31 @@ typedef struct webui_event_inf_t {
 #elif __linux__
     void* libgtk;
     void* libwebkit;
-    // GTK Symbol Addresses
-    typedef void *(*gtk_init_func)(int *argc, char ***argv);
-    typedef void (*gtk_widget_show_all_func)(void *);
-    typedef void (*gtk_main_iteration_do_func)(int);
-    typedef int (*gtk_events_pending_func)(void);
-    typedef void (*gtk_container_add_func)(void *, void *);
-    typedef void *(*gtk_window_new_func)(int);
+    // GTK Symbol Definition
+    typedef void *(*gtk_init_func)(int *argc, char ***argv); // Ini
+    typedef void (*gtk_widget_show_all_func)(void *); // Show
+    typedef int (*gtk_main_iteration_do_func)(int); // Last UI draw when exit
+    typedef int (*gtk_events_pending_func)(void); // Last UI draw when exit
+    typedef void *(*gtk_main_func)(void); // Main loop
+    typedef void *(*gtk_main_quit_func)(void); // Exit main loop
+    typedef int (*g_timeout_add_func)(int, int (*function)(void*), void*); // WebUI exit loop
+    typedef void (*gtk_container_add_func)(void *, void *); // WebView Container
+    typedef void *(*gtk_window_new_func)(int); // New Window
+    typedef int (*g_idle_add_func)(int (*function)(void*), void*); // New Window creation schedule    
     typedef void (*gtk_window_set_default_size_func)(void *, int, int);
     typedef void (*gtk_window_set_title_func)(void *, const char *);
     typedef void (*gtk_window_move_func)(void *, int, int);
     typedef void (*gtk_window_close_func)(void *);
     typedef void (*gtk_window_resize_func)(void *, int, int);
     typedef void (*gtk_window_set_position_func)(void *, int);
-    typedef int (*g_idle_add_func)(int (*function)(void*), void*);
-    typedef void (*g_signal_connect_data_func)(void *, const char *,
-        void (*callback)(void), void *, void *, int);
+    typedef unsigned long (*g_signal_connect_data_func)(void *, const char *, void (*callback)(void), void *, void *, int);
+    // GTK Symbol Initialization
     gtk_init_func gtk_init = NULL;
     gtk_widget_show_all_func gtk_widget_show_all = NULL;
     gtk_main_iteration_do_func gtk_main_iteration_do = NULL;
+    gtk_main_func gtk_main = NULL;
+    gtk_main_quit_func gtk_main_quit = NULL;
+    g_timeout_add_func g_timeout_add = NULL;
     gtk_events_pending_func gtk_events_pending = NULL;
     gtk_container_add_func gtk_container_add = NULL;
     gtk_window_new_func gtk_window_new = NULL;
@@ -303,6 +314,7 @@ typedef struct _webui_window_t {
     size_t num; // Window number
     const char* html_elements[WEBUI_MAX_IDS];
     bool has_all_events;
+    void* cb_context[WEBUI_MAX_IDS];
     void(*cb[WEBUI_MAX_IDS])(webui_event_t* e);
     void(*cb_interface[WEBUI_MAX_IDS])(size_t, size_t, char* , size_t, size_t);
     bool ws_block;
@@ -317,6 +329,7 @@ typedef struct _webui_window_t {
     bool default_profile;
     char* profile_path;
     char* profile_name;
+    char* custom_parameters;
     size_t runtime;
     bool kiosk_mode;
     bool disable_browser_high_contrast;
@@ -333,14 +346,22 @@ typedef struct _webui_window_t {
     size_t process_id;
     const void*(*files_handler)(const char* filename, int* length);
     const void*(*files_handler_window)(size_t window, const char* filename, int* length);
+    const void* file_handler_async_response;
+    int file_handler_async_len;
+    bool file_handler_async_done;
     webui_event_inf_t* events[WEBUI_MAX_IDS];
     size_t events_count;
     bool is_public;
     bool proxy_set;
     char *proxy_server;
+    webui_mutex_t mutex_win_exit_now;
+    bool win_exit_now;
     // WebView
     bool allow_webview;
+    bool allow_browser;
     bool update_webview;
+    webui_mutex_t mutex_webview_update;
+    webui_condition_t condition_webview_update;
     #ifdef _WIN32
     _webui_wv_win32_t* webView;
     #elif __linux__
@@ -360,6 +381,7 @@ typedef struct _webui_core_t {
         bool folder_monitor;
         bool multi_client;
         bool use_cookies;
+        bool asynchronous_response;
     } config;
     struct mg_connection* clients[WEBUI_MAX_IDS];
     size_t clients_win_num[WEBUI_MAX_IDS];
@@ -370,7 +392,7 @@ typedef struct _webui_core_t {
     size_t used_ports[WEBUI_MAX_IDS];
     size_t startup_timeout;
     size_t cb_count;
-    bool exit_now;
+    bool app_exit_now;
     bool run_done[WEBUI_MAX_IDS]; // 2 Bytes ID
     char* run_userBuffer[WEBUI_MAX_IDS];
     size_t run_userBufferLen[WEBUI_MAX_IDS];
@@ -379,7 +401,7 @@ typedef struct _webui_core_t {
     bool initialized;
     char* executable_path;
     void * ptr_list[WEBUI_MAX_IDS * 2];
-    size_t ptr_position;
+    size_t ptr_last_pos;
     size_t ptr_size[WEBUI_MAX_IDS * 2];
     size_t current_browser;
     _webui_window_t* wins[WEBUI_MAX_IDS];
@@ -391,10 +413,12 @@ typedef struct _webui_core_t {
     webui_mutex_t mutex_bridge;
     webui_mutex_t mutex_js_run;
     webui_mutex_t mutex_win_connect;
-    webui_mutex_t mutex_exit_now;
-    webui_mutex_t mutex_webview_stop;
+    webui_mutex_t mutex_app_exit_now;
     webui_mutex_t mutex_http_handler;
     webui_mutex_t mutex_client;
+    webui_mutex_t mutex_async_response;
+    webui_mutex_t mutex_mem;
+    webui_mutex_t mutex_token;
     webui_condition_t condition_wait;
     char* default_server_root_path;
     bool ui;
@@ -505,7 +529,6 @@ static void _webui_timer_clock_gettime(struct timespec * spec);
 static bool _webui_set_root_folder(_webui_window_t* win, const char* path);
 static const char* _webui_generate_js_bridge(_webui_window_t* win, struct mg_connection* client);
 static void _webui_free_mem(void * ptr);
-static size_t _webui_mb(size_t size);
 static bool _webui_file_exist_mg(_webui_window_t* win, struct mg_connection* client);
 static bool _webui_file_exist(const char* path);
 static void _webui_free_all_mem(void);
@@ -527,7 +550,8 @@ static void _webui_mutex_lock(webui_mutex_t* mutex);
 static void _webui_mutex_unlock(webui_mutex_t* mutex);
 static void _webui_mutex_destroy(webui_mutex_t* mutex);
 static bool _webui_mutex_is_connected(_webui_window_t* win, int update);
-static bool _webui_mutex_is_exit_now(int update);
+static bool _webui_mutex_app_is_exit_now(int update);
+static bool _webui_mutex_win_is_exit_now(_webui_window_t* win, int update);
 static bool _webui_mutex_is_webview_update(_webui_window_t* win, int update);
 static void _webui_condition_init(webui_condition_t* cond);
 static void _webui_condition_wait(webui_condition_t* cond, webui_mutex_t* mutex);
@@ -579,6 +603,7 @@ static void _webui_generate_cookies(char* cookies, size_t length);
 static int _webui_serve_file(_webui_window_t* win, struct mg_connection* client, size_t client_id);
 static int _webui_external_file_handler(_webui_window_t* win, struct mg_connection* client, size_t client_id);
 static int _webui_interpret_file(_webui_window_t* win, struct mg_connection* client, char* index, size_t client_id);
+static void _webui_webview_update(_webui_window_t* win);
 // WebView
 #ifdef _WIN32
 // Microsoft Windows
@@ -598,6 +623,7 @@ static bool _webui_wv_set_position(_webui_wv_linux_t* webView, int x, int y);
 static bool _webui_wv_set_size(_webui_wv_linux_t* webView, int windowWidth, int windowHeight);
 static bool _webui_wv_show(_webui_window_t* win, char* url);
 static void _webui_wv_event_closed(void *widget, void *arg);
+static int _webui_wv_exit_schedule(void* arg);
 #else
 // macOS
 static void _webui_wv_free(_webui_wv_macos_t* webView);
@@ -628,21 +654,21 @@ static WEBUI_THREAD_MONITOR;
 #ifdef _WIN32
 #define WEBUI_STR_TOK(str, delim, context) strtok_s(str, delim, context)
 #define WEBUI_FILE_OPEN(file, filename, mode) fopen_s(&file, filename, mode)
-#define WEBUI_SN_PRINTF_DYN(buffer, buffer_size, format, ...) snprintf(buffer, _webui_mb(buffer_size), format, ##__VA_ARGS__)
+#define WEBUI_SN_PRINTF_DYN(buffer, buffer_size, format, ...) snprintf(buffer, (buffer_size + 1), format, ##__VA_ARGS__)
 #define WEBUI_SN_PRINTF_STATIC(buffer, buffer_size, format, ...) snprintf(buffer, buffer_size, format, ##__VA_ARGS__)
-#define WEBUI_STR_COPY_DYN(dest, dest_size, src) strcpy_s(dest, _webui_mb(dest_size), src)
+#define WEBUI_STR_COPY_DYN(dest, dest_size, src) strcpy_s(dest, (dest_size + 1), src)
 #define WEBUI_STR_COPY_STATIC(dest, dest_size, src) strcpy_s(dest, dest_size, src)
-#define WEBUI_STR_CAT_DYN(dest, dest_size, src) strcat_s(dest, _webui_mb(dest_size), src)
-#define WEBUI_STR_CAT_STATIC(dest, dest_size, src) strcat_s(dest, dest_size, src)
+#define WEBUI_STR_CAT_DYN(dest, dest_size, src) strcat_s(dest, (dest_size + 1), src)
+#define WEBUI_STR_CAT_STATIC(dest, dest_size, src) strcat_s(dest, (dest_size - (strlen(dest) - 1)), src)
 #else
 #define WEBUI_STR_TOK(str, delim, context) strtok_r(str, delim, context)
 #define WEBUI_FILE_OPEN(file, filename, mode) ((file) = fopen(filename, mode))
-#define WEBUI_SN_PRINTF_DYN(buffer, buffer_size, format, ...) snprintf(buffer, _webui_mb(buffer_size), format, ##__VA_ARGS__)
+#define WEBUI_SN_PRINTF_DYN(buffer, buffer_size, format, ...) snprintf(buffer, (buffer_size + 1), format, ##__VA_ARGS__)
 #define WEBUI_SN_PRINTF_STATIC(buffer, buffer_size, format, ...) snprintf(buffer, buffer_size, format, ##__VA_ARGS__)
-#define WEBUI_STR_COPY_DYN(dest, dest_size, src) strncpy(dest, src, _webui_mb(dest_size))
+#define WEBUI_STR_COPY_DYN(dest, dest_size, src) strncpy(dest, src, (dest_size + 1))
 #define WEBUI_STR_COPY_STATIC(dest, dest_size, src) strncpy(dest, src, dest_size)
-#define WEBUI_STR_CAT_DYN(dest, dest_size, src) strncat(dest, src, _webui_mb(dest_size))
-#define WEBUI_STR_CAT_STATIC(dest, dest_size, src) strncat(dest, src, dest_size)
+#define WEBUI_STR_CAT_DYN(dest, dest_size, src) strncat(dest, src, (dest_size + 1))
+#define WEBUI_STR_CAT_STATIC(dest, dest_size, src) strncat(dest, src, (dest_size - (strlen(dest) - 1)))
 #endif
 
 // Assert
@@ -679,11 +705,11 @@ void webui_run_client(webui_event_t* e, const char* script) {
         return;
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
-    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
         return;
 
     // Packet Protocol Format:
@@ -710,11 +736,11 @@ void webui_run(size_t window, const char* script) {
         return;
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
-    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
         return;
 
     // Packet Protocol Format:
@@ -722,7 +748,7 @@ void webui_run(size_t window, const char* script) {
     // [CMD]
     // [Script]
 
-    // Send the packet to all clients
+    // Send the packet to all clients because no need for client's response
     _webui_send_all(win, 0, WEBUI_CMD_JS_QUICK, script, js_len);
 }
 
@@ -735,7 +761,7 @@ void webui_set_file_handler(size_t window, const void*(*handler)(const char* fil
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -754,7 +780,7 @@ void webui_set_file_handler_window(size_t window, const void*(*handler)(size_t w
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -783,11 +809,11 @@ bool webui_script_client(webui_event_t* e, const char* script, size_t timeout,
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[e->window];
 
-    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
         return false;
 
     size_t js_len = _webui_strlen(script);
@@ -809,7 +835,7 @@ bool webui_script_client(webui_event_t* e, const char* script, size_t timeout,
     // [CMD]
     // [Script]
 
-    // Send the packet to a single client
+    // Send the packet to a single specific client and wait for response
     _webui_send_client(win, _webui.clients[e->connection_id], run_id, WEBUI_CMD_JS, script, js_len, false);
 
     bool js_status = false;
@@ -874,6 +900,14 @@ bool webui_script(size_t window, const char* script, size_t timeout,
     printf("[User] webui_script([%zu])\n", window);
     #endif
 
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return false;
+    _webui_window_t* win = _webui.wins[window];
+
     // Stop if multi-client mode is enabled.
     // we can't send and receive from all clients
     if (_webui.config.multi_client) {
@@ -887,10 +921,18 @@ bool webui_script(size_t window, const char* script, size_t timeout,
         return false;
     }
 
-    // Event
+    // New Event
     webui_event_t e;
     e.window = window;
-    e.connection_id = 0; // Single client
+    e.connection_id = 0;
+    
+    // Get the single client ID of this current window
+    // because we are in single client mode, and we need
+    // to wait for this client's response.
+    if (!_webui_connection_get_id(win, win->single_client, &e.connection_id))
+        return false;
+    if (_webui.clients[e.connection_id] == NULL)
+        return false;
 
     return webui_script_client(&e, script, timeout, buffer, buffer_length);
 }
@@ -923,7 +965,7 @@ size_t webui_new_window_id(size_t num) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return 0;
 
     // Check window ID
@@ -947,6 +989,11 @@ size_t webui_new_window_id(size_t num) {
         WEBUI_SN_PRINTF_DYN(win->server_root_path, WEBUI_MAX_PATH, "%s", WEBUI_DEFAULT_PATH);
     else
         WEBUI_SN_PRINTF_DYN(win->server_root_path, WEBUI_MAX_PATH, "%s", _webui.default_server_root_path);
+    
+    // Mutex Initialisation
+    _webui_mutex_init(&win->mutex_win_exit_now);
+    _webui_mutex_init(&win->mutex_webview_update);
+    _webui_condition_init(&win->condition_webview_update);
 
     // Auto bind JavaScript-Bridge Core API Handler
     webui_bind(num, "__webui_core_api__", _webui_bridge_api_handler);
@@ -966,7 +1013,7 @@ size_t webui_get_new_window_id(void) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return 0;
 
     for (size_t i = 1; i < WEBUI_MAX_IDS; i++) {
@@ -991,11 +1038,40 @@ void webui_set_kiosk(size_t window, bool status) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
     win->kiosk_mode = status;
+}
+
+void webui_set_custom_parameters(size_t window, char* params) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_set_custom_parameters([%zu], [%s])\n", window, params);
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Always free old data to allow user to clear custom params
+    // by passing an empty `params`.
+    _webui_free_mem((void*)win->custom_parameters);
+    win->custom_parameters = NULL;
+
+    // Check size
+    size_t len = _webui_strlen(params);
+    if (len < 1)
+        return;
+
+    // Set new
+    win->custom_parameters = (char*)_webui_malloc(len);
+    WEBUI_STR_COPY_DYN(win->custom_parameters, len, params);
 }
 
 void webui_set_high_contrast(size_t window, bool status) {
@@ -1008,7 +1084,7 @@ void webui_set_high_contrast(size_t window, bool status) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -1087,7 +1163,7 @@ void webui_close_client(webui_event_t* e) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -1115,13 +1191,13 @@ void webui_close(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
     // Close
     if (!win->webView) {
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             // Packet Protocol Format:
             // [...]
             // [CMD]
@@ -1133,7 +1209,7 @@ void webui_close(size_t window) {
         // Stop WebView thread if any
         if (win->webView) {
             win->webView->stop = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+            _webui_webview_update(win);
         }
     }
 }
@@ -1148,7 +1224,7 @@ void webui_destroy(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -1175,7 +1251,7 @@ void webui_destroy(size_t window) {
             #endif
 
             // Forced close
-            _webui_mutex_is_connected(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_connected(win, WEBUI_MUTEX_SET_FALSE);
 
             // Wait for server threads to stop
             _webui_timer_t timer_2;
@@ -1206,6 +1282,11 @@ void webui_destroy(size_t window) {
             _webui_free_mem((void*)win->events[i]);
     }
 
+    // Free Mutex
+    _webui_condition_destroy(&win->condition_webview_update);
+    _webui_mutex_destroy(&win->mutex_webview_update);
+    _webui_mutex_destroy(&win->mutex_win_exit_now);
+
     // Free window struct
     _webui_free_mem((void*)_webui.wins[window]);
     _webui.wins[window] = NULL;
@@ -1222,11 +1303,11 @@ bool webui_is_shown(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
-    return _webui_mutex_is_connected(win, WEBUI_MUTEX_NONE);
+    return _webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS);
 }
 
 void webui_set_icon(size_t window, const char* icon, const char* icon_type) {
@@ -1239,7 +1320,7 @@ void webui_set_icon(size_t window, const char* icon, const char* icon_type) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -1276,14 +1357,14 @@ void webui_navigate_client(webui_event_t* e, const char* url) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
     // Web-Browser Window
     if (!win->webView) {
 
-        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
             return;
 
         // Packet Protocol Format:
@@ -1308,14 +1389,14 @@ void webui_navigate(size_t window, const char* url) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
     // Web-Browser Window
     if (!win->webView) {
 
-        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
             return;
 
         // Packet Protocol Format:
@@ -1340,7 +1421,7 @@ void webui_navigate(size_t window, const char* url) {
         #endif
 
         win->webView->navigate = true;
-        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+        _webui_webview_update(win);
     }
 }
 
@@ -1470,8 +1551,8 @@ static void _webui_remove_firefox_profile_ini(const char* path, const char* prof
     if (!file)
         return;
 
-    char buffer[4096] = {0};
-    char output[4096] = {0};
+    char buffer[1024 * 3] = {0};
+    char output[1024 * 4] = {0};
     char target[128] = {0};
 
     WEBUI_SN_PRINTF_STATIC(target, sizeof(target), "Name=%s", profile_name);
@@ -1484,14 +1565,14 @@ static void _webui_remove_firefox_profile_ini(const char* path, const char* prof
         }
         if (!skip) {
             if (strstr(buffer, target) != NULL) {
-
                 #ifdef WEBUI_LOG
                 printf("[Core]\t\t_webui_remove_firefox_profile_ini() -> Target found\n");
                 #endif
                 skip = true;
                 continue;
-            } else
-                WEBUI_STR_CAT_DYN(output, sizeof(output), buffer);
+            } else {
+                WEBUI_STR_CAT_STATIC(output, sizeof(output), buffer);
+            }
         }
     }
 
@@ -1570,7 +1651,7 @@ const char* webui_start_server(size_t window, const char* content) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return "";
     _webui_window_t* win = _webui.wins[window];
 
@@ -1599,11 +1680,12 @@ bool webui_show_client(webui_event_t* e, const char* content) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[e->window];
 
     // Show the window using WebView or using any browser
+    win->allow_browser = true;
     win->allow_webview = true;
 
     // Show for single a client
@@ -1620,11 +1702,12 @@ bool webui_show(size_t window, const char* content) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
     // Show the window using WebView or using any browser
+    win->allow_browser = true;
     win->allow_webview = true;
 
     // Show for all connected clients
@@ -1641,15 +1724,16 @@ bool webui_show_wv(size_t window, const char* content) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
     // Show the window using WebView only
+    win->allow_browser = false;
     win->allow_webview = true;
 
     // Show for all connected clients
-    return _webui_show(win, NULL, content, NoBrowser);
+    return _webui_show(win, NULL, content, Webview);
 }
 
 bool webui_show_browser(size_t window, const char* content, size_t browser) {
@@ -1662,15 +1746,69 @@ bool webui_show_browser(size_t window, const char* content, size_t browser) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
     // Show the window using a specific browser only
+    win->allow_browser = (browser == Webview ? false : true);
     win->allow_webview = (browser == Webview ? true : false);
 
     // Show for all connected clients
     return _webui_show(win, NULL, content, browser);
+}
+
+void* webui_get_context(webui_event_t* e) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_get_context()\n");
+    #endif
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
+        return 0;
+    _webui_window_t* win = _webui.wins[e->window];
+
+    // Search
+    size_t cb_index = 0;
+    if (_webui_get_cb_index(win, e->element, &cb_index)) {
+        // Get context
+        #ifdef WEBUI_LOG
+        printf("[User] webui_get_context() -> Found context at %p\n", win->cb_context[cb_index]);
+        #endif
+        return win->cb_context[cb_index];
+    }
+
+    return NULL;
+}
+
+void webui_set_context(size_t window, const char* element, void* context) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_set_context([%zu])\n", window);
+    printf("[User] webui_set_context() -> Element: [%s]\n", element);
+    printf("[User] webui_set_context() -> Context: [%p]\n", context);
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+    
+    // Get bind Index
+    // We should use `webui_bind()` with NULL to make `webui_set_context()`
+    // works fine if user call it before or after `webui_bind()`.
+    size_t cb_index = webui_bind(window, element, NULL);
+
+    // Set context
+    win->cb_context[cb_index] = context;
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_set_context() -> Context saved at %zu\n", cb_index);
+    #endif
 }
 
 size_t webui_bind(size_t window, const char* element, void(*func)(webui_event_t* e)) {
@@ -1683,47 +1821,54 @@ size_t webui_bind(size_t window, const char* element, void(*func)(webui_event_t*
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
     // Search
     size_t cb_index = 0;
-    bool exist = _webui_get_cb_index(win, element, &cb_index);    
+    bool exist = _webui_get_cb_index(win, element, &cb_index);
 
-    // All events
-    if (_webui_is_empty(element)) {
-        win->has_all_events = true;
-        size_t index = (exist ? cb_index : _webui.cb_count++);
-        win->html_elements[index] = "";
-        win->cb[index] = func;
-        #ifdef WEBUI_LOG
-        printf("[User] webui_bind() -> Save bind (all events) at %zu\n", index);
-        #endif
-        return index;
-    }
-
-    // New bind
-    const char* element_cpy = (const char*)_webui_str_dup(element);
+    // Free old ID
     size_t index = (exist ? cb_index : _webui.cb_count++);
-    win->html_elements[index] = element_cpy;
-    win->cb[index] = func;
-    #ifdef WEBUI_LOG
-    printf("[User] webui_bind() -> Save bind at %zu\n", index);
-    #endif
+    _webui_free_mem((void*)win->html_elements[index]);
 
-    // Send to all connected clients the new binding ID
-    // Packet Protocol Format:
+    // All events binding
+    if (_webui_is_empty(element)) {
+        // Empty Element ID Binding (New / Update)
+        win->html_elements[index] = "";
+        if (func != NULL) {
+            win->has_all_events = true;
+            win->cb[index] = func;
+            #ifdef WEBUI_LOG
+            printf("[User] webui_bind() -> Save bind (all events) at %zu\n", index);
+            #endif
+        }
+        return index;
+    } else {
+        // Non-empty Element ID Binding (New / Update)
+        const char* element_cpy = (const char*)_webui_str_dup(element);
+        win->html_elements[index] = element_cpy;
+        if (func != NULL) {
+            win->cb[index] = func;
+            #ifdef WEBUI_LOG
+            printf("[User] webui_bind() -> Save bind at %zu\n", index);
+            #endif
 
-    // [...]
-    // [CMD]
-    // [NewElement]
-    // Send the packet
+            // Send to all connected clients the new binding ID
+            // Packet Protocol Format:
 
-    _webui_send_all(
-        win, 0, WEBUI_CMD_ADD_ID,
-        element, _webui_strlen(element_cpy)
-    );
+            // [...]
+            // [CMD]
+            // [NewElement]
+            // Send the packet
+
+            _webui_send_all(
+                win, 0, WEBUI_CMD_ADD_ID,
+                element, _webui_strlen(element_cpy)
+            );        
+        }
+    }
 
     return index;
 }
@@ -1738,7 +1883,7 @@ size_t webui_get_best_browser(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 1; // 1. Default recommended web browser
     _webui_window_t* win = _webui.wins[window];
     
@@ -1758,7 +1903,7 @@ const char* webui_get_string_at(webui_event_t* e, size_t index) {
         return NULL;
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return NULL;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -1786,7 +1931,7 @@ size_t webui_get_count(webui_event_t* e) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -1885,7 +2030,7 @@ size_t webui_get_size_at(webui_event_t* e, size_t index) {
         return 0;
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -1952,7 +2097,7 @@ void webui_return_int(webui_event_t* e, long long int n) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -1972,6 +2117,13 @@ void webui_return_int(webui_event_t* e, long long int n) {
 
     // Set response
     event_inf->response = buf;
+
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        event_inf->done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
 }
 
 void webui_return_float(webui_event_t* e, double f) {
@@ -1984,7 +2136,7 @@ void webui_return_float(webui_event_t* e, double f) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -2004,6 +2156,13 @@ void webui_return_float(webui_event_t* e, double f) {
 
     // Set response
     event_inf->response = buf;
+
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        event_inf->done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
 }
 
 void webui_return_string(webui_event_t* e, const char* s) {
@@ -2019,7 +2178,7 @@ void webui_return_string(webui_event_t* e, const char* s) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -2039,6 +2198,13 @@ void webui_return_string(webui_event_t* e, const char* s) {
 
     // Set response
     event_inf->response = buf;
+
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        event_inf->done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
 }
 
 void webui_return_bool(webui_event_t* e, bool b) {
@@ -2051,7 +2217,7 @@ void webui_return_bool(webui_event_t* e, bool b) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -2071,6 +2237,13 @@ void webui_return_bool(webui_event_t* e, bool b) {
 
     // Set response
     event_inf->response = buf;
+
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        event_inf->done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
 }
 
 size_t webui_get_parent_process_id(size_t window) {
@@ -2083,7 +2256,7 @@ size_t webui_get_parent_process_id(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2124,7 +2297,7 @@ size_t webui_get_port(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2290,7 +2463,7 @@ void webui_set_config(webui_config option, bool status) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return;
 
     switch (option) {
@@ -2305,6 +2478,9 @@ void webui_set_config(webui_config option, bool status) {
             break;
         case use_cookies:
             _webui.config.use_cookies = status;
+            break;
+        case asynchronous_response:
+            _webui.config.asynchronous_response = status;
             break;
         case ui_event_blocking:
             _webui.config.ws_block = status;
@@ -2332,7 +2508,7 @@ void webui_set_event_blocking(size_t window, bool status) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2349,7 +2525,7 @@ bool webui_set_port(size_t window, size_t port) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2370,7 +2546,7 @@ size_t webui_get_child_process_id(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2457,6 +2633,54 @@ size_t webui_get_child_process_id(size_t window) {
     #endif
 }
 
+void* webui_win32_get_hwnd(size_t window) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_win32_get_hwnd([%zu])\n", window);
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return NULL;
+    _webui_window_t* win = _webui.wins[window];
+
+    #ifdef _WIN32
+    if (_webui.is_webview) {
+        // WebView Window
+        if (win->webView) {
+            return win->webView->hwnd;
+        }
+        return NULL;
+    } else {
+        // Web Browser Window
+        size_t child_pid = webui_get_child_process_id(window);
+        if (child_pid == 0) {
+            return NULL;
+        }
+        HWND hwnd = NULL;
+        int max_iterations = 10000;
+        do {
+            hwnd = FindWindowEx(NULL, hwnd, NULL, NULL);
+            if (hwnd == NULL) {
+                break;
+            }
+            DWORD pid;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid == child_pid) {
+                return hwnd;
+            }
+        } while (--max_iterations > 0);
+        return NULL;
+    }
+    #endif
+
+    // This API is only available on Windows
+    return NULL;
+}
+
 void webui_set_hide(size_t window, bool status) {
 
     #ifdef WEBUI_LOG
@@ -2467,7 +2691,7 @@ void webui_set_hide(size_t window, bool status) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2484,7 +2708,7 @@ void webui_set_size(size_t window, unsigned int width, unsigned int height) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2503,7 +2727,7 @@ void webui_set_size(size_t window, unsigned int width, unsigned int height) {
     if (!win->webView) {
 
         // web-browser window
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             char script[128];
             WEBUI_SN_PRINTF_STATIC(script, sizeof(script), "window.resizeTo(%u, %u);", width, height);
             webui_run(window, script);
@@ -2516,7 +2740,7 @@ void webui_set_size(size_t window, unsigned int width, unsigned int height) {
             win->webView->width = width;
             win->webView->height = height;
             win->webView->size = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+            _webui_webview_update(win);
         }
     }
 }
@@ -2531,7 +2755,7 @@ void webui_set_minimum_size(size_t window, unsigned int width, unsigned int heig
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2557,7 +2781,7 @@ void webui_set_position(size_t window, unsigned int x, unsigned int y) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2578,7 +2802,7 @@ void webui_set_position(size_t window, unsigned int x, unsigned int y) {
     if (!win->webView) {
 
         // web-browser window
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             char script[128];
             WEBUI_SN_PRINTF_STATIC(script, sizeof(script), "window.moveTo(%u, %u);", X, Y);
             webui_run(window, script);
@@ -2591,7 +2815,7 @@ void webui_set_position(size_t window, unsigned int x, unsigned int y) {
             win->webView->x = X;
             win->webView->y = Y;
             win->webView->position = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+            _webui_webview_update(win);
         }
     }
 }
@@ -2606,7 +2830,7 @@ void webui_set_profile(size_t window, const char* name, const char* path) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2645,7 +2869,6 @@ void webui_set_profile(size_t window, const char* name, const char* path) {
         win->default_profile = false;
 }
 
-
 void webui_set_proxy(size_t window, const char* proxy_server) {
 
     #ifdef WEBUI_LOG
@@ -2656,7 +2879,7 @@ void webui_set_proxy(size_t window, const char* proxy_server) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2709,7 +2932,7 @@ const char* webui_get_url(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return NULL;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2732,7 +2955,7 @@ void webui_set_public(size_t window, bool status) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2752,7 +2975,7 @@ void webui_send_raw_client(webui_event_t* e, const char* function, const void* r
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -2802,7 +3025,7 @@ void webui_send_raw(size_t window, const char* function, const void * raw, size_
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -2844,7 +3067,7 @@ char* webui_encode(const char* str) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return NULL;
 
     size_t len = _webui_strlen(str);
@@ -2886,7 +3109,7 @@ char* webui_decode(const char* str) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return NULL;
 
     size_t len = _webui_strlen(str);
@@ -2928,10 +3151,22 @@ void webui_free(void * ptr) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return;
 
     _webui_free_mem(ptr);
+}
+
+void webui_memcpy(void* dest, void* src, size_t count) {
+    
+    #ifdef WEBUI_LOG
+    printf("[User] webui_memcpy()\n");
+    printf("[User] webui_memcpy() -> Copying %zu bytes from [%p] to [%p]\n", count, src, dest);
+    #endif
+
+    if ((dest != NULL) && (src != NULL) && (count > 0)) {
+        memcpy(dest, src, count);
+    }
 }
 
 void * webui_malloc(size_t size) {
@@ -2942,7 +3177,7 @@ void * webui_malloc(size_t size) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return NULL;
 
     return _webui_malloc(size);
@@ -2956,13 +3191,13 @@ void webui_exit(void) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return;
 
     // Close all windows
     for (size_t i = 1; i < WEBUI_MAX_IDS; i++) {
         if (_webui.wins[i] != NULL) {
-            if (_webui_mutex_is_connected(_webui.wins[i], WEBUI_MUTEX_NONE)) {
+            if (_webui_mutex_is_connected(_webui.wins[i], WEBUI_MUTEX_GET_STATUS)) {
 
                 if (!_webui.wins[i]->webView) {
 
@@ -2984,7 +3219,7 @@ void webui_exit(void) {
                     // Stop WebView thread if any
                     if (_webui.wins[i]->webView) {
                         _webui.wins[i]->webView->stop = true;
-                        _webui_mutex_is_webview_update(_webui.wins[i], WEBUI_MUTEX_TRUE);
+                        _webui_webview_update(_webui.wins[i]);
                     }        
                 }
             }
@@ -2992,7 +3227,7 @@ void webui_exit(void) {
     }
 
     // Stop all threads
-    _webui_mutex_is_exit_now(WEBUI_MUTEX_TRUE);
+    _webui_mutex_app_is_exit_now(WEBUI_MUTEX_SET_TRUE);
 
     // Let's give other threads more time to
     // safely exit and finish cleaning up.
@@ -3013,7 +3248,7 @@ void webui_wait(void) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return;
 
     if (_webui.startup_timeout > 0) {
@@ -3094,15 +3329,8 @@ void webui_wait(void) {
 
             _webui.is_gtk_main_run = true;
 
-            while (true) {
-
-                while (gtk_events_pending()) {
-                    gtk_main_iteration_do(0);
-                }
-                
-                if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
-                    break;
-            }
+            // GTK Run Application
+            gtk_main();
 
             _webui.is_gtk_main_run = false;
         }
@@ -3132,7 +3360,7 @@ void webui_wait(void) {
 
                 _webui_macos_wv_process();
 
-                if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+                if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
                     break;
             }
 
@@ -3176,7 +3404,7 @@ void webui_wait(void) {
                 if (_webui.wins[i] != NULL) {
                     if (_webui.wins[i]->webView) {
                         _webui.wins[i]->webView->stop = true;
-                        _webui_mutex_is_webview_update(_webui.wins[i], WEBUI_MUTEX_TRUE);
+                        _webui_webview_update(_webui.wins[i]);
                     }
                 }
                 // Process drawing events if any
@@ -3219,7 +3447,7 @@ void webui_set_timeout(size_t second) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return;
 
     if (second > WEBUI_MAX_TIMEOUT)
@@ -3238,7 +3466,7 @@ void webui_set_runtime(size_t window, size_t runtime) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3258,7 +3486,7 @@ bool webui_set_root_folder(size_t window, const char* path) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3300,7 +3528,7 @@ bool webui_set_default_root_folder(const char* path) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return false;
 
     if (_webui_is_empty(path) || (_webui_strlen(path) > WEBUI_MAX_PATH) || !_webui_folder_exist((char*)path)) {
@@ -3330,17 +3558,17 @@ bool webui_set_default_root_folder(const char* path) {
 }
 
 // -- Interface's Functions ----------------
-static void _webui_interface_bind_handler(webui_event_t* e) {
+static void _webui_interface_bind_handler_all(webui_event_t* e) {
 
     #ifdef WEBUI_LOG
-    printf("[Core]\t\t_webui_interface_bind_handler()\n");
+    printf("[Core]\t\t_webui_interface_bind_handler_all()\n");
     #endif
 
     // Initialization
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[e->window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[e->window];
 
@@ -3352,25 +3580,39 @@ static void _webui_interface_bind_handler(webui_event_t* e) {
             // Call user all-events cb
             #ifdef WEBUI_LOG
             printf(
-                "[Core]\t\t_webui_interface_bind_handler() -> User all-events callback @ 0x%p\n",
+                "[Core]\t\t_webui_interface_bind_handler_all() -> User all-events callback @ 0x%p\n",
                 win->cb_interface[events_cb_index]
             );
-            printf("[Core]\t\t_webui_interface_bind_handler() -> User all-events e->event_type [%zu]\n", e->event_type);
-            printf("[Core]\t\t_webui_interface_bind_handler() -> User all-events e->element [%s]\n", e->element);
-            printf("[Core]\t\t_webui_interface_bind_handler() -> User all-events e->event_number %zu\n", e->event_number);
-            printf("[Core]\t\t_webui_interface_bind_handler() -> User all-events e->bind_id %zu\n", e->bind_id);
+            printf("[Core]\t\t_webui_interface_bind_handler_all() -> User all-events e->event_type [%zu]\n", e->event_type);
+            printf("[Core]\t\t_webui_interface_bind_handler_all() -> User all-events e->element [%s]\n", e->element);
+            printf("[Core]\t\t_webui_interface_bind_handler_all() -> User all-events e->event_number %zu\n", e->event_number);
+            printf("[Core]\t\t_webui_interface_bind_handler_all() -> User all-events e->bind_id %zu\n", e->bind_id);
             #endif
             // Call all-events cb
             #ifdef WEBUI_LOG
-            printf("[Core]\t\t_webui_interface_bind_handler() -> Calling user "
-                "all-events callback\n[Call]\n");
+            printf("[Core]\t\t_webui_interface_bind_handler_all() -> Calling user all-events callback\n[Call]\n");
             #endif
             win->cb_interface[events_cb_index](e->window, e->event_type, e->element, e->event_number, e->bind_id);
         }
     }
+}
+
+static void _webui_interface_bind_handler(webui_event_t* e) {
+
+    #ifdef WEBUI_LOG
+    printf("[Core]\t\t_webui_interface_bind_handler()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[e->window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[e->window];
 
     // Check for the regular bind functions
-    if (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) && !_webui_is_empty(e->element)) {
+    if (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) && !_webui_is_empty(e->element)) {
         size_t cb_index = 0;
         bool exist = _webui_get_cb_index(win, e->element, &cb_index);
         if (exist && win->cb_interface[cb_index] != NULL) {
@@ -3386,27 +3628,35 @@ static void _webui_interface_bind_handler(webui_event_t* e) {
             #endif
             // Call cb
             #ifdef WEBUI_LOG
-            printf("[Core]\t\t_webui_interface_bind_handler() -> Calling user "
-                "callback\n[Call]\n");
+            printf("[Core]\t\t_webui_interface_bind_handler() -> Calling user callback\n[Call]\n");
             #endif
             win->cb_interface[cb_index](e->window, e->event_type, e->element, e->event_number, e->bind_id);
         }
     }
 
-    #ifdef WEBUI_LOG
-    // Print cb response
-    char* response = NULL;
     // Get event inf
     webui_event_inf_t* event_inf = win->events[e->event_number];
     if (event_inf != NULL) {
-        if (event_inf->response != NULL)
-            response = event_inf->response;
+
+        // Async response wait
+        if (_webui.config.asynchronous_response) {
+            bool done = false;
+            while (!done) {
+                _webui_sleep(10);
+                _webui_mutex_lock(&_webui.mutex_async_response);
+                if (event_inf->done) done = true;
+                _webui_mutex_unlock(&_webui.mutex_async_response);
+            }
+        }
+
+        #ifdef WEBUI_LOG
+        // Print cb response
+        printf(
+            "[Core]\t\t_webui_interface_bind_handler() -> user-callback response [%s]\n",
+            event_inf->response
+        );
+        #endif
     }
-    printf(
-        "[Core]\t\t_webui_interface_bind_handler() -> user-callback response [%s]\n",
-        response
-    );
-    #endif
 }
 
 const char* webui_interface_get_string_at(size_t window, size_t event_number, size_t index) {
@@ -3416,7 +3666,7 @@ const char* webui_interface_get_string_at(size_t window, size_t event_number, si
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return NULL;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3435,7 +3685,7 @@ long long int webui_interface_get_int_at(size_t window, size_t event_number, siz
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3454,7 +3704,7 @@ double webui_interface_get_float_at(size_t window, size_t event_number, size_t i
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return ((double)(0.0));
     _webui_window_t* win = _webui.wins[window];
 
@@ -3473,7 +3723,7 @@ bool webui_interface_get_bool_at(size_t window, size_t event_number, size_t inde
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return false;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3492,7 +3742,7 @@ size_t webui_interface_get_size_at(size_t window, size_t event_number, size_t in
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3511,12 +3761,17 @@ size_t webui_interface_bind(size_t window, const char* element, void(*func)(size
     #endif
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
     // Bind
-    size_t cb_index = webui_bind(window, element, _webui_interface_bind_handler);
+    size_t cb_index = 0;
+    if (_webui_is_empty(element)) {
+        cb_index = webui_bind(window, "", _webui_interface_bind_handler_all);
+    } else {
+        cb_index = webui_bind(window, element, _webui_interface_bind_handler);
+    }
     win->cb_interface[cb_index] = func;
     return cb_index;
 }
@@ -3533,7 +3788,7 @@ void webui_interface_set_response(size_t window, size_t event_number, const char
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return;
     _webui_window_t* win = _webui.wins[window];
 
@@ -3551,9 +3806,44 @@ void webui_interface_set_response(size_t window, size_t event_number, const char
     event_inf->response = (char*)_webui_malloc(len);
     WEBUI_STR_COPY_DYN(event_inf->response, len, response);
 
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        event_inf->done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
+
     #ifdef WEBUI_LOG
     printf("[User] webui_interface_set_response() -> Internal buffer [%s] \n", event_inf->response);
     #endif
+}
+
+void webui_interface_set_response_file_handler(size_t window, const void* response, int length) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_set_response_file_handler()\n");
+    printf("[User] webui_interface_set_response_file_handler() -> window #%zu\n", window);
+    printf("[User] webui_interface_set_response_file_handler() -> Response %d bytes\n", length);
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Set the response
+    win->file_handler_async_response = response;
+    win->file_handler_async_len = length;
+
+    // Async response
+    if (_webui.config.asynchronous_response) {
+        _webui_mutex_lock(&_webui.mutex_async_response);
+        win->file_handler_async_done = true;
+        _webui_mutex_unlock(&_webui.mutex_async_response);
+    }
 }
 
 bool webui_interface_is_app_running(void) {
@@ -3569,7 +3859,7 @@ bool webui_interface_is_app_running(void) {
 
     // Initialization
     _webui_init();
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return false;
 
     // Get app status
@@ -3596,11 +3886,192 @@ size_t webui_interface_get_window_id(size_t window) {
     _webui_init();
 
     // Dereference
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || _webui.wins[window] == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
         return 0;
     _webui_window_t* win = _webui.wins[window];
 
     return win->num;
+}
+
+bool webui_interface_show_client(size_t window, size_t event_number, const char* content) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_show_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return false;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return false;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    return webui_show_client(&e, content);
+}
+
+void webui_interface_close_client(size_t window, size_t event_number) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_close_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    webui_close_client(&e);
+}
+
+void webui_interface_send_raw_client(size_t window, size_t event_number, const char* function, const void* raw, size_t size) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_send_raw_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    webui_send_raw_client(&e, function, raw, size);
+}
+
+void webui_interface_navigate_client(size_t window, size_t event_number, const char* url) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_navigate_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    webui_navigate_client(&e, url);
+}
+
+void webui_interface_run_client(size_t window, size_t event_number, const char* script) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_run_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    webui_run_client(&e, script);
+}
+
+bool webui_interface_script_client(size_t window, size_t event_number, const char* script, size_t timeout, char* buffer, size_t buffer_length) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_script_client()\n");
+    #endif
+
+    // Initialization
+    _webui_init();
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return false;
+    _webui_window_t* win = _webui.wins[window];
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[event_number];
+    if (event_inf == NULL)
+        return false;
+
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+    e.connection_id = event_inf->connection_id;
+
+    return webui_script_client(&e, script, timeout, buffer, buffer_length);
+}
+
+void* webui_interface_get_context(size_t window, size_t event_number) {
+
+    #ifdef WEBUI_LOG
+    printf("[User] webui_interface_get_context([%zu], [%zu])\n", window, event_number);
+    #endif
+
+    // Dereference
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui.wins[window] == NULL)
+        return NULL;
+    _webui_window_t* win = _webui.wins[window];
+
+    // New Event (Wrapper)
+    webui_event_t e;
+    e.window = window;
+    e.event_number = event_number;
+
+    return webui_get_context(&e);
 }
 
 // -- Core's Functions ----------------
@@ -3613,8 +4084,7 @@ static bool _webui_ptr_exist(void * ptr) {
     if (ptr == NULL)
         return false;
 
-    for (size_t i = 0; i < _webui.ptr_position; i++) {
-
+    for (size_t i = 0; i < _webui.ptr_last_pos; i++) {
         if (_webui.ptr_list[i] == ptr)
             return true;
     }
@@ -3631,31 +4101,32 @@ static void _webui_ptr_add(void * ptr, size_t size) {
     if (ptr == NULL)
         return;
 
+    // Search for first empty slot & save pointer
     if (!_webui_ptr_exist(ptr)) {
-
-        for (size_t i = 0; i < _webui.ptr_position; i++) {
-
+        size_t i = 0;
+        for (; i < _webui.ptr_last_pos; i++) {
             if (_webui.ptr_list[i] == NULL) {
-
-                #ifdef WEBUI_LOG_VERBOSE
-                printf("[Core]\t\t_webui_ptr_add(0x%p) -> Allocate %zu bytes\n", ptr, size);
-                #endif
-
-                _webui.ptr_list[i] = ptr;
-                _webui.ptr_size[i] = size;
-                return;
+                // Pointer found
+                break;
             }
         }
-
+        if (i == _webui.ptr_last_pos) {
+            // Pointer not found
+            i = _webui.ptr_last_pos++;
+            if (_webui.ptr_last_pos >= (WEBUI_MAX_IDS * 2)) {
+                _webui.ptr_last_pos = ((WEBUI_MAX_IDS * 2) - 1);
+                #ifdef WEBUI_LOG
+                printf("[Core]\t\t_webui_ptr_add(0x%p) -> ERROR: Maximum pointer capacity reached.\n",
+                ptr);
+                #endif
+            }
+        }
+        // Add pointer
+        _webui.ptr_list[i] = ptr;
+        _webui.ptr_size[i] = size;
         #ifdef WEBUI_LOG_VERBOSE
-        printf("[Core]\t\t_webui_ptr_add(0x%p) -> Allocate %zu bytes\n", ptr, size);
-        #endif
-
-        _webui.ptr_list[_webui.ptr_position] = ptr;
-        _webui.ptr_size[_webui.ptr_position] = size;
-        _webui.ptr_position++;
-        if (_webui.ptr_position >= WEBUI_MAX_IDS)
-            _webui.ptr_position = (WEBUI_MAX_IDS - 1);
+        printf("[Core]\t\t_webui_ptr_add(0x%p) -> Pointer #%zu saved (%zu + 1 bytes)\n", ptr, i, size);
+        #endif        
     }
 }
 
@@ -3668,29 +4139,30 @@ static void _webui_free_mem(void * ptr) {
     if (ptr == NULL)
         return;
 
-    for (size_t i = 0; i < _webui.ptr_position; i++) {
+    _webui_mutex_lock(&_webui.mutex_mem);
 
+    // Search for pointer & free
+    for (size_t i = 0; i < _webui.ptr_last_pos; i++) {
         if (_webui.ptr_list[i] == ptr) {
-
             #ifdef WEBUI_LOG_VERBOSE
-            printf("[Core]\t\t_webui_free_mem(0x%p) -> Free %zu bytes\n", ptr, _webui.ptr_size[i]);
+            printf("[Core]\t\t_webui_free_mem(0x%p) -> Pointer #%zu freed (%zu + 1 bytes)\n",
+            ptr, i, _webui.ptr_size[i]);
             #endif
-
             free(ptr);
-
             _webui.ptr_size[i] = 0;
             _webui.ptr_list[i] = NULL;
         }
     }
 
-    for (int i = _webui.ptr_position; i >= 0;i--) {
-
+    // Search (backward) for first empty slot
+    for (int i = _webui.ptr_last_pos; i >= 0;i--) {
         if (_webui.ptr_list[i] == NULL) {
-
-            _webui.ptr_position = i;
+            _webui.ptr_last_pos = i;
             break;
         }
     }
+
+    _webui_mutex_unlock(&_webui.mutex_mem);
 }
 
 static void _webui_free_all_mem(void) {
@@ -3699,28 +4171,30 @@ static void _webui_free_all_mem(void) {
     printf("[Core]\t\t_webui_free_all_mem()\n");
     #endif
 
+    _webui_mutex_lock(&_webui.mutex_mem);    
+
     // Makes sure we run this once
     static bool freed = false;
     if (freed)
         return;
     freed = true;
 
+    // Free all pointers in the list
     void * ptr = NULL;
-    for (size_t i = 0; i < _webui.ptr_position; i++) {
-
+    for (size_t i = 0; i < _webui.ptr_last_pos; i++) {
         ptr = _webui.ptr_list[i];
-
         if (ptr != NULL) {
-
             #ifdef WEBUI_LOG
-            printf(
-                "[Core]\t\t_webui_free_all_mem() -> Free %zu bytes @ 0x%p\n", _webui.ptr_size[i], ptr
-            );
+            printf("[Core]\t\t_webui_free_all_mem() -> Pointer #%zu freed (%zu + 1 bytes) 0x%p\n",
+            i, _webui.ptr_size[i], ptr);
             #endif
-
             free(ptr);
+            _webui.ptr_size[i] = 0;
+            _webui.ptr_list[i] = NULL;
         }
     }
+
+    _webui_mutex_unlock(&_webui.mutex_mem);
 }
 
 static void _webui_panic(char* msg) {
@@ -3733,67 +4207,33 @@ static void _webui_panic(char* msg) {
     webui_exit();
 }
 
-static size_t _webui_mb(size_t size) {
-
-    // Round `size` to fit a memory block
-    // 07 -> 8
-    // 14 -> 16
-    // 29 -> 32
-    // 55 -> 64
-    // ...
-
-    // Make sure we have the null
-    // terminator if it's a string
-    size++;
-
-    // If size is negative
-    if (size < 4)
-        size = 4;
-
-    // If size is already a full block
-    // we should return the same block
-    size--;
-
-    size_t block_size = 4;
-    while(block_size <= size)
-        block_size *= 2;
-
-    return block_size;
-}
-
 static void * _webui_malloc(size_t size) {
 
     #ifdef WEBUI_LOG_VERBOSE
     printf("[Core]\t\t_webui_malloc([%zu])\n", size);
     #endif
 
-    size = _webui_mb(size);
+    _webui_mutex_lock(&_webui.mutex_mem);
 
-    void * block = NULL;
-    for (size_t i = 0; i < 8; i++) {
+    // Dynamic allocation + null terminator
+    void* mem = NULL;
+    mem = malloc(size + 1);
 
-        if (size > WEBUI_MAX_BUF)
-            size = WEBUI_MAX_BUF;
-
-        block = malloc(size);
-
-        if (block == NULL)
-            size++;
-        else
-            break;
-    }
-
-    if (block == NULL) {
-
+    // Check
+    if (mem == NULL) {
         WEBUI_ASSERT("malloc() failed");
         return NULL;
     }
 
-    memset(block, 0, size);
+    // Ini memory block
+    memset(mem, 0, (size + 1));
 
-    _webui_ptr_add((void*)block, size);
+    // Add pointer to the list
+    _webui_ptr_add((void*)mem, size);
 
-    return block;
+    _webui_mutex_unlock(&_webui.mutex_mem);
+
+    return mem;
 }
 
 static _webui_window_t* _webui_dereference_win_ptr(void * ptr) {
@@ -3802,7 +4242,7 @@ static _webui_window_t* _webui_dereference_win_ptr(void * ptr) {
     //printf("[Core]\t\t_webui_dereference_win_ptr()\n");
     #endif
 
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS))
         return NULL;
 
     _webui_window_t* win = (_webui_window_t* ) ptr;
@@ -4244,9 +4684,36 @@ static int _webui_external_file_handler(_webui_window_t* win, struct mg_connecti
         printf("[Call]\n");
         #endif
 
-        // True if we pass the window num to the handler, false otherwise.
-        int is_file_handler_window = win->files_handler_window != NULL;
-        const void* callback_resp = is_file_handler_window ? win->files_handler_window(win->num, url, (int*)&length) : win->files_handler(url, (int*)&length);
+        // Async response ini
+        if (_webui.config.asynchronous_response) {
+            win->file_handler_async_response = NULL;
+            win->file_handler_async_len = 0;
+            win->file_handler_async_done = false;
+        }
+
+        // Call user callback
+        const void* callback_resp = NULL;
+        if (win->files_handler_window != NULL) {
+            callback_resp = win->files_handler_window(win->num, url, (int*)&length);
+        } else {
+            callback_resp = win->files_handler(url, (int*)&length);
+        }
+
+        // Async response wait
+        if (_webui.config.asynchronous_response) {
+            // `callback_resp` is NULL now, we need to
+            // wait for the response that will come later.
+            bool done = false;
+            while (!done) {
+                _webui_sleep(10);
+                _webui_mutex_lock(&_webui.mutex_async_response);
+                if(win->file_handler_async_done) done = true;
+                _webui_mutex_unlock(&_webui.mutex_async_response);
+            }
+            // Get the async response
+            callback_resp = win->file_handler_async_response;
+            length = win->file_handler_async_len;
+        }
 
         if (callback_resp != NULL) {
 
@@ -4263,8 +4730,8 @@ static int _webui_external_file_handler(_webui_window_t* win, struct mg_connecti
 
             #ifdef WEBUI_LOG
             printf("---[ External File Handler ]--------\n");
-            printf("%s\n", (char*)callback_resp);
-            printf("------------------------------------\n");
+            _webui_print_ascii((const char*)callback_resp, length);
+            printf("\n------------------------------------\n");
             #endif
 
             // Send user data (Header + Body)
@@ -4704,7 +5171,7 @@ static const char* _webui_generate_js_bridge(_webui_window_t* win, struct mg_con
     uint32_t token = 0x00000000;
     if (!_webui.config.multi_client) {
         // Single client mode
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             // Non-authorized request to `webui.js` because
             // the single client already connected.
             _webui_mutex_unlock(&_webui.mutex_bridge);
@@ -4760,33 +5227,84 @@ static bool _webui_mutex_is_connected(_webui_window_t* win, int update) {
 
     bool status = false;
     _webui_mutex_lock(&_webui.mutex_win_connect);
-    if (update == WEBUI_MUTEX_TRUE) win->connected = true;
-    else if (update == WEBUI_MUTEX_FALSE) win->connected = false;
+    if (update == WEBUI_MUTEX_SET_TRUE) win->connected = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) win->connected = false;
     status = ((win->clients_count > 0) && (win->connected));
     _webui_mutex_unlock(&_webui.mutex_win_connect);
     return status;
 }
 
-static bool _webui_mutex_is_exit_now(int update) {
+static bool _webui_mutex_is_single_client_token_valid(_webui_window_t* win, int update) {
 
     bool status = false;
-    _webui_mutex_lock(&_webui.mutex_exit_now);
-    if (update == WEBUI_MUTEX_TRUE) _webui.exit_now = true;
-    else if (update == WEBUI_MUTEX_FALSE) _webui.exit_now = false;
-    status = _webui.exit_now;
-    _webui_mutex_unlock(&_webui.mutex_exit_now);
+    _webui_mutex_lock(&_webui.mutex_token);
+    if (update == WEBUI_MUTEX_SET_TRUE) win->single_client_token_check = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) win->single_client_token_check = false;
+    status = win->single_client_token_check;
+    _webui_mutex_unlock(&_webui.mutex_token);
+    return status;
+}
+
+static bool _webui_mutex_is_multi_client_token_valid(_webui_window_t* win, int update, int index) {
+
+    bool status = false;
+    _webui_mutex_lock(&_webui.mutex_token);
+    if (update == WEBUI_MUTEX_SET_TRUE) _webui.clients_token_check[index] = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) _webui.clients_token_check[index] = false;
+    status = _webui.clients_token_check[index];
+    _webui_mutex_unlock(&_webui.mutex_token);
+    return status;
+}
+
+static bool _webui_mutex_app_is_exit_now(int update) {
+
+    bool status = false;
+    _webui_mutex_lock(&_webui.mutex_app_exit_now);
+    if (update == WEBUI_MUTEX_SET_TRUE) _webui.app_exit_now = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) _webui.app_exit_now = false;
+    status = _webui.app_exit_now;
+    _webui_mutex_unlock(&_webui.mutex_app_exit_now);
+    return status;
+}
+
+static bool _webui_mutex_win_is_exit_now(_webui_window_t* win, int update) {
+
+    bool status = false;
+    _webui_mutex_lock(&win->mutex_win_exit_now);
+    if (update == WEBUI_MUTEX_SET_TRUE) win->win_exit_now = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) win->win_exit_now = false;
+    status = win->win_exit_now;
+    _webui_mutex_unlock(&win->mutex_win_exit_now);
     return status;
 }
 
 static bool _webui_mutex_is_webview_update(_webui_window_t* win, int update) {
 
     bool status = false;
-    _webui_mutex_lock(&_webui.mutex_webview_stop);
-    if (update == WEBUI_MUTEX_TRUE) win->update_webview = true;
-    else if (update == WEBUI_MUTEX_FALSE) win->update_webview = false;
+    _webui_mutex_lock(&win->mutex_webview_update);
+    if (update == WEBUI_MUTEX_SET_TRUE) win->update_webview = true;
+    else if (update == WEBUI_MUTEX_SET_FALSE) win->update_webview = false;
     status = win->update_webview;
-    _webui_mutex_unlock(&_webui.mutex_webview_stop);
+    _webui_mutex_unlock(&win->mutex_webview_update);
     return status;
+}
+
+static void _webui_webview_update(_webui_window_t* win) {
+
+    #ifdef WEBUI_LOG
+    printf("[Core]\t\t_webui_webview_update(%zu)\n", win->num);
+    #endif
+
+    #ifdef _WIN32
+    // Windows - WebView2
+    _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_TRUE);
+    #elif __linux__
+    // Linux - GTK WebView
+    _webui_condition_signal(&win->condition_webview_update);
+    #else
+    // macOS - WKWebView
+    _webui_condition_signal(&win->condition_webview_update);
+    #endif
 }
 
 static bool _webui_browser_create_new_profile(_webui_window_t* win, size_t browser) {
@@ -4906,10 +5424,24 @@ static bool _webui_browser_create_new_profile(_webui_window_t* win, size_t brows
         #endif
 
         if (!win->custom_profile){
-            if(!win->disable_browser_high_contrast)
-                WEBUI_SN_PRINTF_DYN(win->profile_path, WEBUI_MAX_PATH, "%s%s.WebUI%sWebUIFirefoxProfile", temp, os_sep, os_sep);
-            else
-                WEBUI_SN_PRINTF_DYN(win->profile_path, WEBUI_MAX_PATH, "%s%s.WebUI%sWebUIFirefoxProfile-NoHC", temp, os_sep, os_sep);
+            // Set Firefox profile folder name
+            const char* ff = "FirefoxProfile";
+            if(!win->disable_browser_high_contrast) {
+                ff = "WebUIFirefoxProfile-NoHC";
+            }
+            // Generate Firefox profile path
+            if (WEBUI_SN_PRINTF_DYN(win->profile_path, WEBUI_MAX_PATH, "%s%s.WebUI%s%s",
+                temp, os_sep, os_sep, ff) >= WEBUI_MAX_PATH) {
+                // Generated path is too big
+                #ifdef WEBUI_LOG
+                printf(
+                    "[Core]\t\t_webui_browser_create_new_profile(%zu) -> "
+                    "Generated Firefox profile folder path is too big\n",
+                    browser
+                );
+                #endif
+                return false;
+            }
         }
 
         if (!_webui_folder_exist(win->profile_path) ||
@@ -4976,8 +5508,10 @@ static bool _webui_browser_create_new_profile(_webui_window_t* win, size_t brows
             if (file == NULL)
                 return false;
             fputs(
-                "#navigator-toolbox{opacity:0 !important;height:0px !important;max-height:0px !important;"
-                "width:0px !important;max-width:0px !important;}"
+                "#navigator-toolbox,#TabsToolbar,#nav-bar,#PersonalToolbar,#sidebar-box{"
+                "visibility:collapse!important;height:0!important;margin:0!important;padding:0!important;}"
+                "#titlebar{visibility:visible!important;display:flex!important;}#browser{"
+                "margin-top:0!important;padding-top:0!important;}"
             , file);
             fclose(file);
         }
@@ -5095,13 +5629,14 @@ static void _webui_send_all(_webui_window_t* win, uint16_t id, unsigned char cmd
     if (_webui.config.multi_client) {
         // Loop trough all connected clients in this window
         for (size_t i = 0; i < WEBUI_MAX_IDS; i++) {
-            if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && (_webui.clients_token_check[i])) {
+            if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && 
+                (_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, i))) {
                 _webui_send_client(win, _webui.clients[i], 0, cmd, data, len, false);
             }
         }
     } else {
         // Single client
-        if ((win->single_client != NULL) && (win->single_client_token_check)) {
+        if ((win->single_client != NULL) && (_webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_GET_STATUS))) {
             _webui_send_client(win, win->single_client, 0, cmd, data, len, false);
         }
     }
@@ -5124,14 +5659,15 @@ static void _webui_send_client(
     
     // Check Token
     if (!token_bypass) {
-        if (!_webui.clients_token_check[connection_id])
+        if (!_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, connection_id))
             return;
     }
 
     #ifdef WEBUI_LOG
-    printf("[Core]\t\t_webui_send_client() -> ID = 0x%04X \n", id);
-    printf("[Core]\t\t_webui_send_client() -> CMD = 0x%02x \n", cmd);
-    printf("[Core]\t\t_webui_send_client() -> Data = %zu bytes \n", len);
+    printf("[Core]\t\t_webui_send_client() -> Connection ID = %zu \n", connection_id);
+    printf("[Core]\t\t_webui_send_client() -> Packet ID = 0x%04X \n", id);
+    printf("[Core]\t\t_webui_send_client() -> Packet CMD = 0x%02x \n", cmd);
+    printf("[Core]\t\t_webui_send_client() -> Packet Data = %zu bytes \n", len);
     #endif
 
     // Protocol
@@ -5908,7 +6444,7 @@ static void _webui_clean(void) {
     cleaned = true;
 
     // Stop all threads
-    _webui_mutex_is_exit_now(WEBUI_MUTEX_TRUE);
+    _webui_mutex_app_is_exit_now(WEBUI_MUTEX_SET_TRUE);
 
     // Let's give other threads more time to safely exit
     // and finish cleaning up.    
@@ -5927,10 +6463,12 @@ static void _webui_clean(void) {
     _webui_mutex_destroy(&_webui.mutex_wait);
     _webui_mutex_destroy(&_webui.mutex_js_run);
     _webui_mutex_destroy(&_webui.mutex_win_connect);
-    _webui_mutex_destroy(&_webui.mutex_exit_now);
-    _webui_mutex_destroy(&_webui.mutex_webview_stop);
+    _webui_mutex_destroy(&_webui.mutex_app_exit_now);
     _webui_mutex_destroy(&_webui.mutex_http_handler);
     _webui_mutex_destroy(&_webui.mutex_client);
+    _webui_mutex_destroy(&_webui.mutex_async_response);
+    _webui_mutex_destroy(&_webui.mutex_mem);
+    _webui_mutex_destroy(&_webui.mutex_token);
     _webui_condition_destroy(&_webui.condition_wait);
 
     #ifdef WEBUI_LOG
@@ -6045,70 +6583,83 @@ static int _webui_get_browser_args(_webui_window_t* win, size_t browser, char* b
         case Chromium:
             // Profile
             if (!_webui_is_empty(win->profile_path))
-                c = WEBUI_SN_PRINTF_DYN(buffer, len, " --user-data-dir=\"%s\"", win->profile_path);
+                c = WEBUI_SN_PRINTF_STATIC(buffer, len, " --user-data-dir=\"%s\"", win->profile_path);
             // Basic
-            for (int i = 0; i < (int)(sizeof(chromium_options) / sizeof(chromium_options[0])); i++) {
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", chromium_options[i]);
+            if (_webui_is_empty(win->custom_parameters)) {
+                for (int i = 0; i < (int)(sizeof(chromium_options) / sizeof(chromium_options[0])); i++) {
+                    c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", chromium_options[i]);
+                }
             }
             // Kiosk Mode
             if (win->kiosk_mode)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "--chrome-frame --kiosk");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "--chrome-frame --kiosk");
             // High Contrast Support
             if (win->disable_browser_high_contrast)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "--disable-features=ForcedColors");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "--disable-features=ForcedColors");
             // Hide Mode
             if (win->hide)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "--headless --headless=new");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "--headless --headless=new");
             // Window Size
             if (win->size_set)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " --window-size=%u,%u", win->width, win->height);
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " --window-size=%u,%u", win->width, win->height);
             // Window Position
             if (win->position_set)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " --window-position=%u,%u", win->x, win->y);
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " --window-position=%u,%u", win->x, win->y);
             // Proxy
             if (win->proxy_set)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " --proxy-server=%s", win->proxy_server);
-            else
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "--no-proxy-server");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " --proxy-server=%s", win->proxy_server);
+            else {
+                if (_webui_is_empty(win->custom_parameters)) {
+                    c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "--no-proxy-server");
+                }
+            }
+            // User-defined command line parameters.
+            if (!_webui_is_empty(win->custom_parameters)) {
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", win->custom_parameters);
+            }
 
             // URL (END)
-            c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "--app=");
+            c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "--app=");
             return c;
         case Firefox:
             // Profile
             if (!_webui_is_empty(win->profile_name))
-                c = WEBUI_SN_PRINTF_DYN(buffer, len, " -P %s", win->profile_name);
+                c = WEBUI_SN_PRINTF_STATIC(buffer, len, " -P %s", win->profile_name);
             // Basic
-            c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " -purgecaches");
+            if (_webui_is_empty(win->custom_parameters)) {
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " -purgecaches");
+            }
             // Kiosk Mode
             if (win->kiosk_mode)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "-kiosk");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "-kiosk");
             // Hide Mode
             if (win->hide)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " %s", "-headless");
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", "-headless");
             // Window Size
             if (win->size_set)
-                c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " -width %u -height %u", win->width, win->height);
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " -width %u -height %u", win->width, win->height);
             // Window Position
-            // Firefox does not support window positioning.
+                // Firefox does not support window positioning.
             // Proxy
             if (win->proxy_set) {
                 // Server: `win->proxy_server`
-
                 // TODO: Add proxy feature to Firefox
                 // Method 1: modifying `prefs.js` / user.js
                 // Method 2: use Proxy Auto-Configuration (PAC) file
             }
+            // User-defined command line parameters.
+            if (!_webui_is_empty(win->custom_parameters))
+                c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " %s", win->custom_parameters);
 
             // URL (END)
-            c += WEBUI_SN_PRINTF_DYN(buffer + c, len, " -new-window ");
+            c += WEBUI_SN_PRINTF_STATIC(buffer + c, len, " -new-window ");
             return c;
     }
 
     #ifdef WEBUI_LOG
     printf("[Core]\t\t_webui_get_browser_args() -> Unknown Browser (%zu)\n", browser);
     #endif
-    WEBUI_STR_COPY_DYN(buffer, len, "");
+    WEBUI_STR_COPY_STATIC(buffer, len, "");
     return 0;
 }
 
@@ -6375,7 +6926,7 @@ static bool _webui_browser_start(_webui_window_t* win, const char* address, size
     #endif
 
     // Non existing browser
-    if (_browser > 12)
+    if (_browser > 13)
         return false;
 
     // No browser mode
@@ -6995,6 +7546,7 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
     #endif
 
     // Initialization
+    _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_SET_FALSE);
     if (win->html != NULL)
         _webui_free_mem((void*)win->html);
     if (win->url != NULL)
@@ -7069,13 +7621,13 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
     }
 
     // Run the window
-    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
 
         // Start a new window
 
-        // Prioritize the server thread if we
-        // knows that there is UIs running
         if (_webui.ui) {
+            // Prioritize the server thread if we
+            // knows that there is UIs running.
             
             // New server thread
             #ifdef _WIN32
@@ -7112,43 +7664,46 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
         // Run browser
         bool runBrowser = false;
         if (!runWebView) {
-            if (browser != NoBrowser) {
-                if (!_webui_browser_start(win, window_url, browser)) {
-                    #ifdef WEBUI_LOG
-                    printf("[Core]\t\t_webui_show_window() -> App-mode browser failed\n");
-                    #endif
-                    // Opening App-mode browser failed
-                    // let's try opening UI in native default browser
-                    if (browser == AnyBrowser && _webui_open_url_native(window_url)) {
+            if (win->allow_browser) {
+                if (browser != NoBrowser) {
+                    if (!_webui_browser_start(win, window_url, browser)) {
                         #ifdef WEBUI_LOG
-                        printf("[Core]\t\t_webui_show_window() -> Native browser succeeded\n");
+                        printf("[Core]\t\t_webui_show_window() -> App-mode browser failed\n");
                         #endif
-                        runBrowser = true;
+                        // Opening App-mode browser failed
+                        // let's try opening UI in native default browser
+                        if (browser == AnyBrowser && _webui_open_url_native(window_url)) {
+                            #ifdef WEBUI_LOG
+                            printf("[Core]\t\t_webui_show_window() -> Native browser succeeded\n");
+                            #endif
+                            runBrowser = true;
+                        }
+                        else {
+                            #ifdef WEBUI_LOG
+                            printf("[Core]\t\t_webui_show_window() -> Native browser failed\n");
+                            #endif
+                        }
                     }
                     else {
                         #ifdef WEBUI_LOG
-                        printf("[Core]\t\t_webui_show_window() -> Native browser failed\n");
+                        printf("[Core]\t\t_webui_show_window() -> App-mode browser succeeded\n");
                         #endif
+                        runBrowser = true;
                     }
-                }
-                else {
+                } else {
                     #ifdef WEBUI_LOG
-                    printf("[Core]\t\t_webui_show_window() -> App-mode browser succeeded\n");
+                    printf("[Core]\t\t_webui_show_window() -> Starting server only mode (NoBrowser)\n");
                     #endif
                     runBrowser = true;
                 }
-            } else {
-                #ifdef WEBUI_LOG
-                printf("[Core]\t\t_webui_show_window() -> Starting server only mode (NoBrowser)\n");
-                #endif
-                runBrowser = true;
             }
         }
 
         _webui_free_mem((void*)window_url);
         if (browser != NoBrowser) {
             if (!runWebView && !runBrowser) {
-                // Browser and WebView are not available
+                // Browser and WebView both failed
+                _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_SET_TRUE);
                 _webui_free_mem((void*)win->html);
                 _webui_free_mem((void*)win->url);
                 _webui_free_port(win->server_port);
@@ -7206,11 +7761,11 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
         _webui_free_mem((void*)window_url);
     }
 
-    // Wait for window connection
+    // Wait for window connection & token validation
     if ((browser != NoBrowser) && _webui.config.show_wait_connection) {
 
         #ifdef WEBUI_LOG
-        printf("[Core]\t\t_webui_show_window() -> Waiting for window connection\n");
+        printf("[Core]\t\t_webui_show_window() -> Waiting for window connection & token validation\n");
         #endif
 
         size_t timeout = (_webui.startup_timeout > 0 ? 
@@ -7218,6 +7773,8 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
         );
 
         if (_webui.is_webview) {
+
+            // WebView
 
             _webui_timer_t timer;
             _webui_timer_start(&timer);
@@ -7244,8 +7801,8 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
                     #endif
                 }
 
-                // Stop if window is connected
-                if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                // Stop if window is connected & token is valid
+                if (_webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_GET_STATUS))
                     break;
                 
                 // Stop if timer is finished
@@ -7254,15 +7811,16 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
             }
         } else {
 
-            // Wait for server thread to start
+            // Web Browser
+
             _webui_timer_t timer;
             _webui_timer_start(&timer);
             for (;;) {
 
                 _webui_sleep(10);
 
-                // Stop if window is connected
-                if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                // Stop if window is connected & token is valid
+                if (_webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_GET_STATUS))
                     break;
                 
                 // Stop if timer is finished
@@ -7271,8 +7829,8 @@ static bool _webui_show_window(_webui_window_t* win, struct mg_connection* clien
             }
         }
 
-        // The window is successfully launched and connected.
-        return _webui_mutex_is_connected(win, WEBUI_MUTEX_NONE);
+        // Return status of the window connection (not token validation)
+        return _webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS);
     }
 
     // The window is successfully launched.
@@ -7299,7 +7857,7 @@ static void _webui_window_event(
     e.cookies = (char*)cookies;
 
     // Check for all events-bind functions
-    if (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) && win->has_all_events) {
+    if (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) && win->has_all_events) {
         size_t events_cb_index = 0;
         bool exist = _webui_get_cb_index(win, "", &events_cb_index);
         if (exist && win->cb[events_cb_index] != NULL) {
@@ -7313,7 +7871,7 @@ static void _webui_window_event(
         }
     }
 
-    if (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) {
+    if (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) {
         // Check for the regular bind functions
         if (!_webui_is_empty(element)) {
             size_t cb_index = 0;
@@ -7326,6 +7884,22 @@ static void _webui_window_event(
                 #endif
                 e.bind_id = cb_index;
                 win->cb[cb_index](&e);
+            }
+        }
+    }
+
+    // Get event inf
+    webui_event_inf_t* event_inf = win->events[e.event_number];
+    if (event_inf != NULL) {
+
+        // Async response wait
+        if (_webui.config.asynchronous_response) {
+            bool done = false;
+            while (!done) {
+                _webui_sleep(10);
+                _webui_mutex_lock(&_webui.mutex_async_response);
+                if (event_inf->done) done = true;
+                _webui_mutex_unlock(&_webui.mutex_async_response);
             }
         }
     }
@@ -7351,7 +7925,7 @@ static void _webui_send_client_ws(_webui_window_t* win, struct mg_connection* cl
         WEBUI_ASSERT("_webui_send_client_ws() null ptr");
     }
 
-    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE) || packet == NULL ||
+    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS) || packet == NULL ||
         packets_size < WEBUI_PROTOCOL_SIZE)
         return;
 
@@ -7457,6 +8031,22 @@ static void _webui_init(void) {
     printf("[Core]\t\t_webui_init()\n");
     #endif
 
+    // Initializing mutex
+    _webui_mutex_init(&_webui.mutex_server_start);
+    _webui_mutex_init(&_webui.mutex_send);
+    _webui_mutex_init(&_webui.mutex_receive);
+    _webui_mutex_init(&_webui.mutex_wait);
+    _webui_mutex_init(&_webui.mutex_bridge);
+    _webui_mutex_init(&_webui.mutex_js_run);
+    _webui_mutex_init(&_webui.mutex_win_connect);
+    _webui_mutex_init(&_webui.mutex_app_exit_now);
+    _webui_mutex_init(&_webui.mutex_http_handler);
+    _webui_mutex_init(&_webui.mutex_client);
+    _webui_mutex_init(&_webui.mutex_async_response);
+    _webui_mutex_init(&_webui.mutex_mem);
+    _webui_mutex_init(&_webui.mutex_token);
+    _webui_condition_init(&_webui.condition_wait);
+
     // Random
     #ifdef _WIN32
     srand((unsigned int) time(NULL));
@@ -7481,20 +8071,6 @@ static void _webui_init(void) {
     #else
     mg_init_library(0);
     #endif
-
-    // Initializing mutex
-    _webui_mutex_init(&_webui.mutex_server_start);
-    _webui_mutex_init(&_webui.mutex_send);
-    _webui_mutex_init(&_webui.mutex_receive);
-    _webui_mutex_init(&_webui.mutex_wait);
-    _webui_mutex_init(&_webui.mutex_bridge);
-    _webui_mutex_init(&_webui.mutex_js_run);
-    _webui_mutex_init(&_webui.mutex_win_connect);
-    _webui_mutex_init(&_webui.mutex_exit_now);
-    _webui_mutex_init(&_webui.mutex_webview_stop);
-    _webui_mutex_init(&_webui.mutex_http_handler);
-    _webui_mutex_init(&_webui.mutex_client);
-    _webui_condition_init(&_webui.condition_wait);
 }
 
 static const char* _webui_url_encode(const char* str) {
@@ -7661,8 +8237,8 @@ static void _webui_http_send_header(
 
     #ifdef WEBUI_LOG
     printf("---[ HTTP Header ]-----------------\n");
-    printf("%s\n", buffer);
-    printf("-----------------------------------\n");
+    printf("%s", buffer);
+    printf("\n-----------------------------------\n");
     #endif
 
     // Send
@@ -7892,7 +8468,7 @@ static int _webui_http_handler(struct mg_connection* client, void * _win) {
 
     // Get the window object
     _webui_window_t* win = _webui_dereference_win_ptr(_win);
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || win == NULL) {
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || win == NULL) {
         _webui_mutex_unlock(&_webui.mutex_http_handler);
         return 500; // Internal Server Error
     }
@@ -7993,6 +8569,12 @@ static int _webui_http_handler(struct mg_connection* client, void * _win) {
 
                 #ifdef WEBUI_LOG
                 printf("[Core]\t\t_webui_http_handler() -> Embedded Index HTML\n");
+                #endif
+
+                #ifdef WEBUI_LOG
+                printf("---[ HTML (%zu bytes)]--------------\n", _webui_strlen(win->html));
+                printf("%s", win->html);
+                printf("\n------------------------------------\n");
                 #endif
 
                 // Send 200
@@ -8180,12 +8762,12 @@ static int _webui_ws_connect_handler(const struct mg_connection* client, void * 
 
     // Dereference
     _webui_window_t* win = _webui_dereference_win_ptr(_win);
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || win == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || win == NULL)
         return 1;
     
     // Check connection status
     if (!_webui.config.multi_client) {
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             // Multi-client is disabled, and the single client already connected.
             #ifdef WEBUI_LOG
             printf("[Core]\t\t_webui_ws_connect_handler() -> Single client already connected\n");
@@ -8249,7 +8831,7 @@ static void _webui_ws_ready_handler(struct mg_connection* client, void * _win) {
 
     // Dereference
     _webui_window_t* win = _webui_dereference_win_ptr(_win);
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || win == NULL)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || win == NULL)
         return;
 
     _webui_receive(win, client, WEBUI_WS_OPEN, NULL, 0);
@@ -8261,7 +8843,7 @@ static int _webui_ws_data_handler(struct mg_connection* client, int opcode, char
     printf("[Core]\t\t_webui_ws_data_handler()\n");
     #endif
 
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || datasize < WEBUI_PROTOCOL_SIZE)
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || datasize < WEBUI_PROTOCOL_SIZE)
         return 1; // OK
 
     switch(opcode&0xf) {
@@ -8299,7 +8881,7 @@ static void _webui_ws_close_handler(const struct mg_connection* client, void * _
 
     // Dereference
     _webui_window_t* win = _webui_dereference_win_ptr(_win);
-    if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE) || win == NULL || !_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+    if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || win == NULL || !_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
         return;
 
     _webui_receive(win, (struct mg_connection*)client, WEBUI_WS_CLOSE, NULL, 0);
@@ -8419,7 +9001,7 @@ static WEBUI_THREAD_SERVER_START {
 
             while(!stop) {
 
-                if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+                if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
 
                     // UI is not connected
 
@@ -8437,8 +9019,14 @@ static WEBUI_THREAD_SERVER_START {
 
                         _webui_sleep(1);
 
+                        // Stop if we get exit signal
+                        if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_GET_STATUS)) {
+                            stop = true;
+                            break;
+                        }
+
                         // Stop if window is connected
-                        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
                             break;
 
                         // Stop if timer is finished (Default WEBUI_DEF_TIMEOUT)
@@ -8446,7 +9034,7 @@ static WEBUI_THREAD_SERVER_START {
                             break;
                     }
 
-                    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE) && win->wait) {
+                    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS) && win->wait) {
 
                         // At this moment the browser is already started and HTML
                         // files are already handled, let's wait more time to give
@@ -8468,19 +9056,25 @@ static WEBUI_THREAD_SERVER_START {
                             _webui_timer_start(&timer_2);
                             for (;;) {
 
+                                // Stop if we get exit signal
+                                if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_GET_STATUS)) {
+                                    stop = true;
+                                    break;
+                                }
+
                                 // Stop if window is connected
                                 _webui_sleep(1);
-                                if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                                if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
                                     break;
 
                                 // Stop if timer is finished
                                 if (_webui_timer_is_end(&timer_2, 5000))
                                     break;
                             }
-                        } while(win->wait && !_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE));
+                        } while(win->wait && !_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS));
                     }
 
-                    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                    if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
                         stop = true; // First run failed
                 }
                 else {
@@ -8515,12 +9109,12 @@ static WEBUI_THREAD_SERVER_START {
                         _webui_sleep(1);
 
                         // Exit signal
-                        if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) {
+                        if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_GET_STATUS)) {
                             stop = true;
                             break;
                         }
 
-                        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+                        if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
 
                             // The UI is just get disconnected
 
@@ -8550,18 +9144,24 @@ static WEBUI_THREAD_SERVER_START {
                                     _webui_timer_start(&timer_3);
                                     for (;;) {
 
+                                        // Stop if we get exit signal
+                                        if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_GET_STATUS)) {
+                                            stop = true;
+                                            break;
+                                        }
+
                                         // Stop if window is re-connected
                                         _webui_sleep(1);
-                                        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE))
+                                        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS))
                                             break;
 
                                         // Stop if timer is finished
                                         if (_webui_timer_is_end(&timer_3, WEBUI_RELOAD_TIMEOUT))
                                             break;
                                     }
-                                } while(win->wait && !_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE));
+                                } while(win->wait && !_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS));
 
-                                if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+                                if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
                                     stop = true;
                                     break;
                                 }
@@ -8610,7 +9210,7 @@ static WEBUI_THREAD_SERVER_START {
             // Wait forever
             for (;;) {
                 _webui_sleep(1);
-                if (_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE))
+                if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS) || _webui_mutex_win_is_exit_now(win, WEBUI_MUTEX_GET_STATUS))
                     break;
             }
         }
@@ -8628,12 +9228,12 @@ static WEBUI_THREAD_SERVER_START {
     printf("[Core]\t\t_webui_server_thread([%zu]) -> Cleaning\n", win->num);
     #endif
 
-    _webui_mutex_is_connected(win, WEBUI_MUTEX_FALSE);
+    _webui_mutex_is_connected(win, WEBUI_MUTEX_SET_FALSE);
 
     // Clean WebView
     if (win->webView) {
         win->webView->stop = true;
-        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+        _webui_webview_update(win);
     }
 
     // Clean
@@ -8666,7 +9266,7 @@ static WEBUI_THREAD_SERVER_START {
 
         // Stop all threads
         _webui.ui = false;
-        _webui_mutex_is_exit_now(WEBUI_MUTEX_TRUE);
+        _webui_mutex_app_is_exit_now(WEBUI_MUTEX_SET_TRUE);
         // Break main loop
         _webui_condition_signal(&_webui.condition_wait);
         #ifdef __APPLE__
@@ -8724,7 +9324,7 @@ static void _webui_receive(_webui_window_t* win, struct mg_connection* client,
         // Autorisation to register
         bool authorization = false;
         if (!_webui.config.multi_client) {
-            if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+            if (!_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
                 authorization = true;
             }
         } else authorization = true;
@@ -8740,7 +9340,7 @@ static void _webui_receive(_webui_window_t* win, struct mg_connection* client,
             // Register
             if (_webui_connection_save(win, client, &connection_id)) {
                 // Update window connection status
-                _webui_mutex_is_connected(win, WEBUI_MUTEX_TRUE);
+                _webui_mutex_is_connected(win, WEBUI_MUTEX_SET_TRUE);
                 #ifdef WEBUI_LOG
                 printf(
                     "[Core]\t\t_webui_receive(%zu) -> Connection #%zu registered\n",
@@ -8894,11 +9494,11 @@ static bool _webui_connection_save(_webui_window_t* win, struct mg_connection* c
             // Save
             if (win->single_client == NULL) {
                 win->single_client = client;
-                win->single_client_token_check = false;
+                _webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_SET_FALSE);
             }
             _webui.clients[i] = client;
             _webui.clients_win_num[i] = win->num;
-            _webui.clients_token_check[i] = false;
+            _webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_SET_FALSE, i);
             win->clients_count++;
             _webui_mutex_unlock(&_webui.mutex_client);
             *connection_id = i;
@@ -8929,18 +9529,18 @@ static void _webui_connection_remove(_webui_window_t* win, struct mg_connection*
             #endif
             // Reset Token
             if (!_webui.config.multi_client) {
-                if (_webui.clients_token_check[i]) {
+                if (_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, i)) {
                     win->token = 0;
                 }
             }
             // Clear
             if (win->single_client == client) {
                 win->single_client = NULL;
-                win->single_client_token_check = false;
+                _webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_SET_FALSE);
             }
             _webui.clients[i] = NULL;
             _webui.clients_win_num[i] = 0;
-            _webui.clients_token_check[i] = false;
+            _webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_SET_FALSE, i);
             if (win->clients_count > 0)
                 win->clients_count--;
             // Close
@@ -8989,7 +9589,7 @@ static void _webui_ws_process(
     printf("[Core]\t\t_webui_ws_process(%zu)\n", recvNum);
     #endif
 
-    if (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) {
+    if (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) {
 
         #ifdef WEBUI_LOG
         printf("[Core]\t\t_webui_ws_process(%zu) -> Start\n", recvNum);
@@ -9042,7 +9642,7 @@ static void _webui_ws_process(
                     }
                 }
 
-                if (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) { // Check if previous event called exit()
+                if (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) { // Check if previous event called exit()
 
                     if ((unsigned char)packet[WEBUI_PROTOCOL_CMD] == WEBUI_CMD_CLICK) {
 
@@ -9071,25 +9671,24 @@ static void _webui_ws_process(
                         );
                         #endif
 
-                        // New event inf (Click)
-                        // webui_event_inf_t* event_inf = NULL;
-                        // size_t event_num = _webui_new_event_inf(win, &event_inf);
-
-                        // Set arguments
-                        // ...
+                        // Event Info
+                        webui_event_inf_t* event_inf = NULL;
+                        size_t event_num = _webui_new_event_inf(win, &event_inf);
+                        event_inf->client = client;
+                        event_inf->connection_id = connection_id;
 
                         _webui_window_event(
                             win, // Event -> Window
                             connection_id, // Event -> Client Unique ID
                             WEBUI_EVENT_MOUSE_CLICK, // Event -> Type of this event
                             element, // Event -> HTML Element
-                            0, // Event -> Event Number
+                            event_num, // Event -> Event Number
                             _webui_client_get_id(win, client), // Event -> Client ID
                             _webui_get_cookies_full(client) // Event -> Full cookies
                         );
 
                         // Free event
-                        // _webui_free_event_inf(win, event_num);
+                        _webui_free_event_inf(win, event_num);
                     } else if ((unsigned char)packet[WEBUI_PROTOCOL_CMD] == WEBUI_CMD_JS) {
 
                         // JS Result
@@ -9199,11 +9798,13 @@ static void _webui_ws_process(
                             );
                             #endif
 
-                            // New event inf (Navigation)
+                            // Event Info
                             webui_event_inf_t* event_inf = NULL;
                             size_t event_num = _webui_new_event_inf(win, &event_inf);
+                            event_inf->client = client;
+                            event_inf->connection_id = connection_id;
 
-                            // Set arguments
+                            // Event Info Extras
                             event_inf->event_data[0] = url;
                             event_inf->event_size[0] = url_len;
 
@@ -9325,6 +9926,17 @@ static void _webui_ws_process(
                                 #endif
                                 e.bind_id = cb_index;
                                 win->cb[cb_index](&e);
+
+                                // Async response wait
+                                if (_webui.config.asynchronous_response) {
+                                    bool done = false;
+                                    while (!done) {
+                                        _webui_sleep(10);
+                                        _webui_mutex_lock(&_webui.mutex_async_response);
+                                        if (event_inf->done) done = true;
+                                        _webui_mutex_unlock(&_webui.mutex_async_response);
+                                    }
+                                }
                             }
 
                             // Check the response
@@ -9395,9 +10007,9 @@ static void _webui_ws_process(
                         if (_webui_connection_get_id(win, client, &connection_id)) {
 
                             if (win->single_client == client) {
-                                win->single_client_token_check = true;
+                                _webui_mutex_is_single_client_token_valid(win, WEBUI_MUTEX_SET_TRUE);
                             }
-                            _webui.clients_token_check[connection_id] = true;
+                            _webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_SET_TRUE, connection_id);
 
                             #ifdef WEBUI_LOG
                             printf(
@@ -9414,10 +10026,13 @@ static void _webui_ws_process(
                                     csv_size += _webui_strlen(win->html_elements[i]) + 1;
                                 }
                             }
-
+                            if (win->has_all_events) {
+                                csv_size++;
+                            }
                             // Allocate
                             char* csv = (char*)_webui_malloc(csv_size);
                             csv[0] = 0x01;
+                            csv_size--;
 
                             // Generate the bind list array (CSV)
                             for (size_t i = 0; i < WEBUI_MAX_IDS; i++) {
@@ -9447,30 +10062,29 @@ static void _webui_ws_process(
                             );
 
                             // Free
-                            _webui_free_mem((void*)csv);                            
+                            _webui_free_mem((void*)csv);
 
                             // New Event
                             if (win->has_all_events) {
 
-                                // New event inf (Connected)
-                                // webui_event_inf_t* event_inf = NULL;
-                                // size_t event_num = _webui_new_event_inf(win, &event_inf);
-
-                                // Set arguments
-                                // ...
+                                // Event Info
+                                webui_event_inf_t* event_inf = NULL;
+                                size_t event_num = _webui_new_event_inf(win, &event_inf);
+                                event_inf->client = client;
+                                event_inf->connection_id = connection_id;
 
                                 _webui_window_event(
                                     win, // Event -> Window
                                     connection_id, // Event -> Client Unique ID
                                     WEBUI_EVENT_CONNECTED, // Event -> Type of this event
                                     "", // Event -> HTML Element
-                                    0, // Event -> Event Number
+                                    event_num, // Event -> Event Number
                                     _webui_client_get_id(win, client), // Event -> Client ID
                                     _webui_get_cookies_full(client) // Event -> Full cookies
                                 );
 
                                 // Free event
-                                // _webui_free_event_inf(win, event_num);
+                                _webui_free_event_inf(win, event_num);
                             }
                         }
                         else {
@@ -9559,25 +10173,24 @@ static void _webui_ws_process(
             // New Event
             if (win->has_all_events) {
 
-                // New event inf (Connected)
-                // webui_event_inf_t* event_inf = NULL;
-                // size_t event_num = _webui_new_event_inf(win, &event_inf);
-
-                // Set arguments
-                // ...
+                // Event Info
+                webui_event_inf_t* event_inf = NULL;
+                size_t event_num = _webui_new_event_inf(win, &event_inf);
+                event_inf->client = client;
+                event_inf->connection_id = connection_id;
 
                 _webui_window_event(
                     win, // Event -> Window
                     connection_id, // Event -> Client Unique ID
                     WEBUI_EVENT_CONNECTED, // Event -> Type of this event
                     "", // Event -> HTML Element
-                    0, // Event -> Event Number
+                    event_num, // Event -> Event Number
                     _webui_client_get_id(win, client), // Event -> Client ID
                     _webui_get_cookies_full(client) // Event -> Full cookies
                 );
 
                 // Free event
-                // _webui_free_event_inf(win, event_num);
+                _webui_free_event_inf(win, event_num);
             }
             */
         } else if (event_type == WEBUI_WS_CLOSE) {
@@ -9594,25 +10207,24 @@ static void _webui_ws_process(
             // Events
             if (win->has_all_events) {
 
-                // New event inf (Disconnected)
-                // webui_event_inf_t* event_inf = NULL;
-                // size_t event_num = _webui_new_event_inf(win, &event_inf);
-
-                // Set arguments
-                // ...
+                // Event Info
+                webui_event_inf_t* event_inf = NULL;
+                size_t event_num = _webui_new_event_inf(win, &event_inf);
+                event_inf->client = client;
+                event_inf->connection_id = connection_id;
 
                 _webui_window_event(
                     win, // Event -> Window
                     connection_id, // Event -> Client Unique ID
                     WEBUI_EVENT_DISCONNECTED, // Event -> Type of this event
                     "", // Event -> HTML Element
-                    0, // Event -> Event Number
+                    event_num, // Event -> Event Number
                     _webui_client_get_id(win, client), // Event -> Client ID
                     _webui_get_cookies_full(client) // Event -> Full cookies
                 );
 
                 // Free event
-                // _webui_free_event_inf(win, event_num);
+                _webui_free_event_inf(win, event_num);
             }
         }
         #ifdef WEBUI_LOG
@@ -10278,7 +10890,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
                     // and free resources.
                     if (win->webView) {
                         win->webView->stop = true;
-                        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+                        _webui_webview_update(win);
                     }                    
                     _webui_wv_event_closed(win);
                 }
@@ -10338,7 +10950,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         // Expecting `_webui_webview_thread` to change `mutex_is_webview_update` 
         // to `false` when initialization is done, and `_webui.is_webview`
         // to `true` if loading the WebView is succeeded.
-        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+        _webui_webview_update(win);
 
         // Win32 WebView thread
         #ifdef _WIN32
@@ -10356,7 +10968,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         _webui_timer_start(&timer);
         for (;;) {
             _webui_sleep(10);
-            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_GET_STATUS)) {
                 // WebView thread just started
                 // and loaded WebView successfully
                 break;
@@ -10457,7 +11069,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (win == NULL) {
             _webui_wv_free(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -10467,7 +11079,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             if (!_webui.webviewLib) {
                 _webui_wv_free(win->webView);
                 win->webView = NULL;
-                _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+                _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
                 WEBUI_THREAD_RETURN
             }
         }
@@ -10489,7 +11101,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             _webui_wv_free(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -10510,7 +11122,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (!win->webView->hwnd) {
             _webui_wv_free(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -10525,7 +11137,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (!createEnv) {
             _webui_wv_free(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -10533,7 +11145,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (!environmentHandler) {
             _webui_wv_free(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -10559,19 +11171,17 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             // Success
             // Let `wait()` use safe main-thread WebView2 loop
             _webui.is_webview = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
-
+            
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             MSG msg;
             while (true) {
 
-                // Win32 Messages
-                if (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
+                // Check if there is any Win32 Messages
 
-                    // Process
+                if (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
-
-                    // Check if window manually closed
+                    // Window manually closed
                     if (msg.message == WM_QUIT) {
                         if (win->webView) {
                             DestroyWindow(win->webView->hwnd);
@@ -10579,36 +11189,41 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
                         break;
                     }
                 }
+                else {
 
-                if (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+                    // No Win32 Messages.
+                    // Check if there is any WebUI Messages
 
-                    _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
-
-                    if (win->webView) {
-
-                        // Stop this thread
-                        if (win->webView->stop) {
-                            DestroyWindow(win->webView->hwnd);
-                            break;
+                    if (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_GET_STATUS)) {
+                        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
+                        if (win->webView) {
+                            // Stop this thread
+                            if (win->webView->stop) {
+                                DestroyWindow(win->webView->hwnd);
+                                break;
+                            }
+                            // Window Size
+                            if (win->webView->size) {
+                                win->webView->size = false;
+                                _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
+                            }
+                            // Window Position
+                            if (win->webView->position) {
+                                win->webView->position = false;
+                                _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
+                            }
+                            // Navigation
+                            if (win->webView->navigate) {
+                                win->webView->navigate = false;
+                                _webui_wv_navigate(win->webView, win->webView->url);
+                            }
                         }
+                    }
+                    else {
 
-                        // Window Size
-                        if (win->webView->size) {
-                            win->webView->size = false;
-                            _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
-                        }
-
-                        // Window Position
-                        if (win->webView->position) {
-                            win->webView->position = false;
-                            _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
-                        }
-
-                        // Navigation
-                        if (win->webView->navigate) {
-                            win->webView->navigate = false;
-                            _webui_wv_navigate(win->webView, win->webView->url);
-                        }
+                        // At this moment, there is no Win32 or WebUI messages.
+                        // Let's IDLE for 10ms in this current thread.
+                        _webui_sleep(10);
                     }
                 }
             }
@@ -10753,8 +11368,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         }
 
         _webui.is_webview = false;
-        libgtk = NULL;
         libwebkit = NULL;
+        libgtk = NULL;
     };
 
     static void _webui_wv_create(_webui_window_t* win) {
@@ -10811,6 +11426,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         pthread_create(&thread, NULL, &_webui_webview_thread, (void*)win);
         pthread_detach(thread);
         #endif
+
+        // WebUI Exit Event for GTK
+        g_timeout_add((1 * 1000), _webui_wv_exit_schedule, NULL);
     }
 
     static int _webui_wv_create_schedule(void* arg) {
@@ -10828,6 +11446,24 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         }
 
         return 0;
+    }
+
+    static int _webui_wv_exit_schedule(void* arg) {
+
+        #ifdef WEBUI_LOG
+        // printf("[Core]\t\t_webui_wv_exit_schedule()\n");
+        #endif
+
+        if (_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) {
+            if (_webui.is_gtk_main_run) {
+                #ifdef WEBUI_LOG
+                printf("[Core]\t\t_webui_wv_exit_schedule() -> Quit GTK Main Loop...\n");
+                #endif
+                gtk_main_quit();
+            }
+            return 0;
+        }
+        return 1;
     }
 
     static bool _webui_wv_show(_webui_window_t* win, char* url) {
@@ -10896,6 +11532,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
                 libgtk, "gtk_widget_show_all");
             gtk_main_iteration_do = (gtk_main_iteration_do_func)dlsym(
                 libgtk, "gtk_main_iteration_do");
+            gtk_main = (gtk_main_func)dlsym(
+                libgtk, "gtk_main");
+            gtk_main_quit = (gtk_main_quit_func)dlsym(
+                libgtk, "gtk_main_quit");
+            g_timeout_add = (g_timeout_add_func)dlsym(
+                libgtk, "g_timeout_add");
             gtk_events_pending = (gtk_events_pending_func)dlsym(
                 libgtk, "gtk_events_pending");
             gtk_container_add = (gtk_container_add_func)dlsym(
@@ -10929,12 +11571,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
 
             // Check GTK
             if (
-                // GTK Commun
-                !gtk_init || !gtk_window_new || !gtk_window_set_default_size
-                || !gtk_window_set_title || !g_signal_connect_data
                 // GTK v3
-                || !gtk_widget_show_all || !gtk_main_iteration_do
-                || !gtk_events_pending || !gtk_container_add
+                !gtk_init || !gtk_window_new || !gtk_window_set_default_size
+                || !gtk_window_set_title || !g_signal_connect_data || !gtk_main
+                || !gtk_main_quit || !gtk_widget_show_all || !gtk_main_iteration_do
+                || !g_timeout_add || !gtk_events_pending || !gtk_container_add
                 || !gtk_window_move
                 // GTK v4
                 // ...
@@ -10963,7 +11604,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         // Free old WebView
         if (win->webView) {
             win->webView->stop = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+            _webui_webview_update(win);
         }
 
         // Copy URL
@@ -10997,10 +11638,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             // from this thread, which is should be fired from
             // the back-end main thread.
 
-            #ifdef WEBUI_LOG
-            printf("[Core]\t\t_webui_wv_show() -> New WebView window\n");
-            #endif
-
             _webui_wv_create(win);
         }
 
@@ -11008,7 +11645,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         // Expecting `_webui_webview_thread` to change `mutex_is_webview_update` 
         // to `false` when initialization is done, and `_webui.is_webview`
         // to `true` if loading the WebView is succeeded.
-        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+        _webui_webview_update(win);
 
         // Wait for WebView thread to get
         // started by `_webui_wv_create()`
@@ -11017,7 +11654,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         _webui_timer_start(&timer);
         for (;;) {
             _webui_sleep(100);
-            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_GET_STATUS)) {
                 // WebView thread just started
                 // and loaded window successfully
                 break;
@@ -11044,7 +11681,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (win == NULL) {
             _webui_wv_close(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -11052,7 +11689,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (!libgtk || !libwebkit) {
             _webui_wv_close(win->webView);
             win->webView = NULL;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
             WEBUI_THREAD_RETURN
         }
 
@@ -11065,40 +11702,38 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             // Success
             // Let `wait()` use safe main-thread GTK WebView loop
             _webui.is_webview = true;
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
 
             while (true) {
 
-                if (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+                // Wait for WebUI Messages
 
-                    _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+                _webui_mutex_lock(&win->mutex_webview_update);
+                _webui_condition_wait(&win->condition_webview_update, &win->mutex_webview_update);
 
-                    if (win->webView) {
-
-                        // Stop this thread
-                        if (win->webView->stop) {
-                            break;
-                        }
-
-                        // Window Size
-                        if (win->webView->size) {
-                            win->webView->size = false;
-                            _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
-                        }
-
-                        // Window Position
-                        if (win->webView->position) {
-                            win->webView->position = false;
-                            _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
-                        }
-
-                        // Navigation
-                        if (win->webView->navigate) {
-                            win->webView->navigate = false;
-                            _webui_wv_navigate(win->webView, win->webView->url);
-                        }
+                if (win->webView) {
+                    // Stop this thread
+                    if (win->webView->stop) {
+                        break;
+                    }
+                    // Window Size
+                    if (win->webView->size) {
+                        win->webView->size = false;
+                        _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
+                    }
+                    // Window Position
+                    if (win->webView->position) {
+                        win->webView->position = false;
+                        _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
+                    }
+                    // Navigation
+                    if (win->webView->navigate) {
+                        win->webView->navigate = false;
+                        _webui_wv_navigate(win->webView, win->webView->url);
                     }
                 }
+
+                _webui_mutex_unlock(&win->mutex_webview_update);
             }
         }
 
@@ -11168,7 +11803,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             _webui.wins[index]->is_closed = true;
             if (_webui.wins[index]->webView) {
                 // Close window
-                if (_webui_mutex_is_connected(_webui.wins[index], WEBUI_MUTEX_NONE)) {
+                if (_webui_mutex_is_connected(_webui.wins[index], WEBUI_MUTEX_GET_STATUS)) {
                     _webui_send_all(
                         _webui.wins[index], 0, WEBUI_CMD_CLOSE, NULL, 0
                     );
@@ -11176,7 +11811,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
                 // Stop WebView thread if any
                 if (_webui.wins[index]->webView) {
                     _webui.wins[index]->webView->stop = true;
-                    _webui_mutex_is_webview_update(_webui.wins[index], WEBUI_MUTEX_TRUE);
+                    _webui_webview_update(_webui.wins[index]);
                 }
             }
         }
@@ -11237,7 +11872,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         // Initializing
         // Expecting `_webui_webview_thread` to change
         // `mutex_is_webview_update` to false when success
-        _webui_mutex_is_webview_update(win, WEBUI_MUTEX_TRUE);
+        _webui_webview_update(win);
 
         // macOS WebView thread
         #ifdef _WIN32
@@ -11255,7 +11890,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         _webui_timer_start(&timer);
         for (;;) {
             _webui_sleep(10);
-            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+            if (!_webui_mutex_is_webview_update(win, WEBUI_MUTEX_GET_STATUS)) {
                 // WebView thread just started
                 // and loaded WebView successfully
                 break;
@@ -11266,7 +11901,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
             }
         }
 
-        return (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE) == false);
+        return (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_GET_STATUS) == false);
     };
 
     static WEBUI_THREAD_WEBVIEW {
@@ -11286,49 +11921,45 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
         if (true) {
 
             // Success
-            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
+            _webui_mutex_is_webview_update(win, WEBUI_MUTEX_SET_FALSE);
 
             while (true) {
 
-                // Messages ...
+                // Check if there is any WebUI Messages
 
-                if (_webui_mutex_is_webview_update(win, WEBUI_MUTEX_NONE)) {
+                _webui_mutex_lock(&win->mutex_webview_update);
+                _webui_condition_wait(&win->condition_webview_update, &win->mutex_webview_update);
 
-                    _webui_mutex_is_webview_update(win, WEBUI_MUTEX_FALSE);
-
-                    if (win->webView) {
-
-                        // Stop this thread
-                        if (win->webView->stop) {
-                            _webui_macos_wv_close(win->webView->index);
-                            break;
-                        }
-
-                        // Window Size
-                        if (win->webView->size) {
-                            win->webView->size = false;
-                            _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
-                        }
-
-                        // Window Position
-                        if (win->webView->position) {
-                            win->webView->position = false;
-                            _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
-                        }
-
-                        // Navigation
-                        if (win->webView->navigate) {
-                            win->webView->navigate = false;
-                            _webui_wv_navigate(win->webView, win->webView->url);
-                        }
+                if (win->webView) {
+                    // Stop this thread
+                    if (win->webView->stop) {
+                        _webui_macos_wv_close(win->webView->index);
+                        break;
+                    }
+                    // Window Size
+                    if (win->webView->size) {
+                        win->webView->size = false;
+                        _webui_wv_set_size(win->webView, win->webView->width, win->webView->height);
+                    }
+                    // Window Position
+                    if (win->webView->position) {
+                        win->webView->position = false;
+                        _webui_wv_set_position(win->webView, win->webView->x, win->webView->y);
+                    }
+                    // Navigation
+                    if (win->webView->navigate) {
+                        win->webView->navigate = false;
+                        _webui_wv_navigate(win->webView, win->webView->url);
                     }
                 }
+
+                _webui_mutex_unlock(&win->mutex_webview_update);
             }
         }
 
         // Close window in case WKWebView did
         // not fire the close event.
-        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_NONE)) {
+        if (_webui_mutex_is_connected(win, WEBUI_MUTEX_GET_STATUS)) {
             _webui_send_all(
                 win, 0, WEBUI_CMD_CLOSE, NULL, 0
             );
@@ -11387,7 +12018,7 @@ static WEBUI_THREAD_MONITOR {
         #endif
         char buffer[1024];
         DWORD bytesReturned;
-        while ((!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) && (win->server_running)) {
+        while ((!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) && (win->server_running)) {
             if (ReadDirectoryChangesW(
                     hDir, buffer, sizeof(buffer), TRUE,
                     FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES |
@@ -11399,7 +12030,8 @@ static WEBUI_THREAD_MONITOR {
                 #endif
                 // Loop trough all connected clients in this window
                 for (size_t i = 0; i < WEBUI_MAX_IDS; i++) {
-                    if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && (_webui.clients_token_check[i])) {
+                    if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && 
+                        (_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, i))) {
                         _webui_send_client(win, _webui.clients[i], 0, WEBUI_CMD_JS_QUICK, js, js_len, false);
                     }
                 }
@@ -11432,7 +12064,7 @@ static WEBUI_THREAD_MONITOR {
         printf("[Core]\t\t[Thread .] _webui_folder_monitor_thread() -> Monitoring [%s]\n", win->server_root_path);
         #endif
         char buffer[1024];
-        while (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) {
+        while (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) {
             int length = read(fd, buffer, sizeof(buffer));
             if (length < 0) {
                 #ifdef WEBUI_LOG
@@ -11450,7 +12082,8 @@ static WEBUI_THREAD_MONITOR {
                         #endif
                         // Loop trough all connected clients in this window
                         for (size_t i = 0; i < WEBUI_MAX_IDS; i++) {
-                            if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && (_webui.clients_token_check[i])) {
+                            if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && 
+                                (_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, i))) {
                                 _webui_send_client(win, _webui.clients[i], 0, WEBUI_CMD_JS_QUICK, js, js_len, false);
                             }
                         }
@@ -11483,7 +12116,7 @@ static WEBUI_THREAD_MONITOR {
         #endif
         struct kevent change;
         EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_ONESHOT, NOTE_WRITE, 0, NULL);
-        while (!_webui_mutex_is_exit_now(WEBUI_MUTEX_NONE)) {
+        while (!_webui_mutex_app_is_exit_now(WEBUI_MUTEX_GET_STATUS)) {
             struct kevent event;
             int nev = kevent(kq, &change, 1, &event, 1, NULL);
             if (nev == -1) {
@@ -11498,7 +12131,8 @@ static WEBUI_THREAD_MONITOR {
                     #endif
                     // Loop trough all connected clients in this window
                     for (size_t i = 0; i < WEBUI_MAX_IDS; i++) {
-                        if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && (_webui.clients_token_check[i])) {
+                        if ((_webui.clients[i] != NULL) && (_webui.clients_win_num[i] == win->num) && 
+                            (_webui_mutex_is_multi_client_token_valid(win, WEBUI_MUTEX_GET_STATUS, i))) {
                             _webui_send_client(win, _webui.clients[i], 0, WEBUI_CMD_JS_QUICK, js, js_len, false);
                         }
                     }

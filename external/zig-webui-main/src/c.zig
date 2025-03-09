@@ -47,6 +47,45 @@ pub extern fn webui_bind(
     func: *const fn (e: *Event) callconv(.C) void,
 ) callconv(.C) usize;
 
+/// @brief Use this API after using `webui_bind()` to add any user data to it that can be
+/// read later using `webui_get_context()`.
+///
+/// @param window The window number
+/// @param element The HTML element / JavaScript object
+/// @param context Any user data
+///
+/// @example
+/// webui_bind(myWindow, "myFunction", myFunction);
+///
+/// webui_set_context(myWindow, "myFunction", myData);
+///
+/// void myFunction(webui_event_t* e) {
+///   void* myData = webui_get_context(e);
+/// }
+pub extern fn webui_set_context(
+    window: usize,
+    element: [*:0]const u8,
+    context: *anyopaque,
+) callconv(.C) void;
+
+/// @brief Get user data that is set using `webui_set_context()`.
+///
+/// @param e The event struct
+///
+/// @return Returns user data pointer.
+///
+/// @example
+/// webui_bind(myWindow, "myFunction", myFunction);
+///
+/// webui_set_context(myWindow, "myFunction", myData);
+///
+/// void myFunction(webui_event_t* e) {
+///   void* myData = webui_get_context(e);
+/// }
+pub extern fn webui_get_context(
+    e: *Event,
+) callconv(.C) *anyopaque;
+
 /// @brief Get the recommended web browser ID to use. If you
 /// are already using one, this function will return the same ID.
 ///
@@ -130,6 +169,14 @@ pub extern fn webui_show_wv(window: usize, content: [*:0]const u8) callconv(.C) 
 ///
 /// @example webui_set_kiosk(my_window, true);
 pub extern fn webui_set_kiosk(window: usize, status: bool) callconv(.C) void;
+
+/// @brief Add a user-defined web browser's CLI parameters.
+///
+/// @param window The window number
+/// @param params Command line parameters
+///
+/// @example webui_set_custom_parameters(myWindow, "--remote-debugging-port=9222");
+pub extern fn webui_set_custom_parameters(window: usize, params: [*:0]const u8) callconv(.C) void;
 
 /// @brief Set the window with high-contrast support. Useful when you want to
 /// build a better high-contrast theme with CSS.
@@ -234,6 +281,22 @@ pub extern fn webui_set_file_handler_window(
     ) callconv(.C) ?*const anyopaque,
 ) callconv(.C) void;
 
+///
+/// @brief Use this API to set a file handler response if your backend need async
+/// response for `webui_set_file_handler()`.
+///
+/// @param window The window number
+/// @param response The response buffer
+/// @param length The response size
+///
+/// @example webui_interface_set_response_file_handler(myWindow, buffer, 1024);
+///
+pub extern fn webui_interface_set_response_file_handler(
+    window: usize,
+    response: ?*const anyopaque,
+    length: usize,
+) callconv(.C) void;
+
 /// @brief Check if the specified window is still running.
 ///
 /// @param window The window number
@@ -286,6 +349,19 @@ pub extern fn webui_decode(str: [*:0]const u8) callconv(.C) ?[*:0]u8;
 ///
 /// @example webui_free(my_buffer);
 pub extern fn webui_free(ptr: *anyopaque) callconv(.C) void;
+
+/// @brief Copy raw data.
+///
+/// @param dest Destination memory pointer
+/// @param src Source memory pointer
+/// @param count Bytes to copy
+///
+/// @example webui_memcpy(myBuffer, myData, 64);
+pub extern fn webui_memcpy(
+    dest: *anyopaque,
+    src: *anyopaque,
+    count: usize,
+) callconv(.C) void;
 
 /// @brief Safely allocate memory using the WebUI memory management system. It
 /// can be safely freed using `webui_free()` at any time.
@@ -881,3 +957,97 @@ pub extern fn webui_interface_get_size_at(
     event_number: usize,
     index: usize,
 ) callconv(.C) usize;
+
+/// @brief Show a window using embedded HTML, or a file. If the window is already
+/// open, it will be refreshed. Single client.
+///
+/// @param window The window number
+/// @param event_number The event number
+/// @param content The HTML, URL, Or a local file
+///
+/// @return Returns True if showing the window is successed.
+///
+/// @example webui_show_client(e, "<html>...</html>"); |
+/// webui_show_client(e, "index.html"); | webui_show_client(e, "http://...");
+pub extern fn webui_interface_show_client(
+    window: usize,
+    event_number: usize,
+    content: [*:0]const u8,
+) callconv(.C) bool;
+
+/// @brief Close a specific client.
+///
+/// @param window The window number
+/// @param event_number The event number
+///
+/// @example webui_close_client(e);
+pub extern fn webui_interface_close_client(
+    window: usize,
+    event_number: usize,
+) callconv(.C) void;
+
+/// @brief Safely send raw data to the UI. Single client.
+///
+/// @param window The window number
+/// @param event_number The event number
+/// @param function The JavaScript function to receive raw data: `function
+/// myFunc(myData){}`
+/// @param raw The raw data buffer
+/// @param size The raw data size in bytes
+///
+/// @example webui_send_raw_client(e, "myJavaScriptFunc", myBuffer, 64);
+pub extern fn webui_interface_send_raw_client(
+    window: usize,
+    event_number: usize,
+    function: [*:0]const u8,
+    raw: [*c]const u8,
+    size: usize,
+) callconv(.C) void;
+
+/// @brief Navigate to a specific URL. Single client.
+///
+/// @param window The window number
+/// @param event_number The event number
+/// @param url Full HTTP URL
+///
+/// @example webui_navigate_client(e, "http://domain.com");
+pub extern fn webui_interface_navigate_client(
+    window: usize,
+    event_number: usize,
+    url: [*:0]const u8,
+) callconv(.C) void;
+
+/// @brief Run JavaScript without waiting for the response. Single client.
+///
+/// @param window The window number
+/// @param event_number The event number
+/// @param script The JavaScript to be run
+///
+/// @example webui_run_client(e, "alert('Hello');");
+pub extern fn webui_interface_run_client(
+    window: usize,
+    event_number: usize,
+    script: [*:0]const u8,
+) callconv(.C) void;
+
+/// @brief Run JavaScript and get the response back. Single client.
+/// Make sure your local buffer can hold the response.
+///
+/// @param window The window number
+/// @param event_number The event number
+/// @param script The JavaScript to be run
+/// @param timeout The execution timeout in seconds
+/// @param buffer The local buffer to hold the response
+/// @param buffer_length The local buffer size
+///
+/// @return Returns True if there is no execution error
+///
+/// @example bool err = webui_script_client(e, "return 4 + 6;", 0, myBuffer, myBufferSize);
+pub extern fn webui_interface_script_client(
+    window: usize,
+    event_number: usize,
+    script: [*:0]const u8,
+    timeout: usize,
+    buffer: [*c]u8,
+    buffer_length: usize,
+) callconv(.C) void;

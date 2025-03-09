@@ -20,22 +20,16 @@ const CLib = struct {
 
         options.dynamic = options.b.option(bool, libdyn_option, "") orelse options.dynamic;
 
-        const bin = if (options.dynamic)
-            options.b.addSharedLibrary(.{
-                .name = options.name,
+        const bin = options.b.addLibrary(.{
+            .linkage = if (options.dynamic) .dynamic else .static,
+            .name = options.name,
+            .root_module = options.b.createModule(std.Build.Module.CreateOptions{
                 .target = options.target,
                 .optimize = options.optimize,
                 .strip = options.strip,
                 .link_libc = options.link_libc,
-            })
-        else
-            options.b.addStaticLibrary(.{
-                .name = options.name,
-                .target = options.target,
-                .optimize = options.optimize,
-                .strip = options.strip,
-                .link_libc = options.link_libc,
-            });
+            }),
+        });
 
         for (options.dependencies) |dependency| {
             bin.linkLibrary(dependency);
@@ -73,7 +67,7 @@ const CLib = struct {
 };
 
 fn nfde_cpp(options: *CLib, bin: *std.Build.Step.Compile) void {
-    bin.defineCMacro("NFD_EXPORT", "1");
+    bin.root_module.addCMacro("NFD_EXPORT", "1");
 
     switch (options.target.result.os.tag) {
         .windows => {
@@ -136,8 +130,7 @@ pub fn build(b: *std.Build) void {
     const liboptimize = b.option(std.builtin.OptimizeMode, "liboptimize", "Optimize libraries") orelse std.builtin.OptimizeMode.ReleaseFast;
     const libstrippdb = b.option(bool, "libstrippdb", "Strip debug symbols for libraries") orelse true;
 
-    const exe = b.addExecutable(.{
-        .name = "waveboard_zig",
+    const exe = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -276,11 +269,9 @@ pub fn build(b: *std.Build) void {
     const nfd_bin = nfd.makeLibrary();
     exe.linkLibrary(nfd_bin);
 
-    b.installArtifact(exe);
-
     // Can't find the webui artifact using .artifact on dynamic lib
 
-    const webui = b.dependency("zig-webui", .{
+    const webui = b.dependency("zig_webui", .{
         .target = target,
         .optimize = liboptimize,
         .enable_tls = false,
@@ -293,13 +284,19 @@ pub fn build(b: *std.Build) void {
         .implib_dir = .disabled,
     }).step);
 
-    exe.root_module.addImport("webui", webui);
+    exe.addImport("webui", webui);
 
-    const regex = b.dependency("regex", .{
+    const regex = b.dependency("_regex", .{
         .target = target,
         .optimize = liboptimize,
     });
 
-    exe.root_module.addImport("regex", regex.module("regex"));
-    //exe.root_module.addImport("win32", b.dependency("zigwin32", .{}).module("zigwin32"));
+    exe.addImport("regex", regex.module("regex"));
+
+    const exeBin = b.addExecutable(std.Build.ExecutableOptions{
+        .name = "waveboard_zig",
+        .root_module = exe,
+    });
+
+    b.installArtifact(exeBin);
 }

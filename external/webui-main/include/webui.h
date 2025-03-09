@@ -2,7 +2,7 @@
   WebUI Library
   https://webui.me
   https://github.com/webui-dev/webui
-  Copyright (c) 2020-2024 Hassan Draga.
+  Copyright (c) 2020-2025 Hassan Draga.
   Licensed under MIT License.
   All rights reserved.
   Canada.
@@ -11,7 +11,7 @@
 #ifndef _WEBUI_H
 #define _WEBUI_H
 
-#define WEBUI_VERSION "2.5.0-beta.2"
+#define WEBUI_VERSION "2.5.0-beta.3"
 
 // Max windows, servers and threads
 #define WEBUI_MAX_IDS (256)
@@ -20,7 +20,7 @@
 #define WEBUI_MAX_ARG (16)
 
 // Dynamic Library Exports
-#if defined(_MSC_VER) || defined(__TINYC__)
+#if defined(_WIN32) && (defined(_MSC_VER) || defined(__TINYC__))
     #ifndef WEBUI_EXPORT
         #define WEBUI_EXPORT __declspec(dllexport)
     #endif
@@ -173,12 +173,18 @@ typedef enum {
     //
     // Default: False
     multi_client,
-    // Allow multiple clients to connect to the same window,
-    // This is helpful for web apps (non-desktop software),
-    // Please see the documentation for more details.
+    // Allow or prevent WebUI from adding `webui_auth` cookies.
+    // WebUI uses these cookies to identify clients and block 
+    // unauthorized access to the window content using a URL.
+    // Please keep this option to `True` if you want only a single
+    // client to access the window content.
     //
-    // Default: False
+    // Default: True
     use_cookies,
+    // If the backend uses asynchronous operations, set this 
+    // option to `True`. This will make webui wait until the 
+    // backend sets a response using `webui_return_x()`.
+    asynchronous_response
 } webui_config;
 
 // -- Structs -------------------------
@@ -238,6 +244,43 @@ WEBUI_EXPORT size_t webui_get_new_window_id(void);
  * @example webui_bind(myWindow, "myFunction", myFunction);
  */
 WEBUI_EXPORT size_t webui_bind(size_t window, const char* element, void (*func)(webui_event_t* e));
+
+/**
+ * @brief Use this API after using `webui_bind()` to add any user data to it that can be
+ * read later using `webui_get_context()`.
+ *
+ * @param window The window number
+ * @param element The HTML element / JavaScript object
+ * @param context Any user data
+ *
+ * @example
+ * webui_bind(myWindow, "myFunction", myFunction);
+ * 
+ * webui_set_context(myWindow, "myFunction", myData);
+ * 
+ * void myFunction(webui_event_t* e) {
+ *   void* myData = webui_get_context(e);
+ * }
+ */
+WEBUI_EXPORT void webui_set_context(size_t window, const char* element, void* context);
+
+/**
+ * @brief Get user data that is set using `webui_set_context()`.
+ *
+ * @param e The event struct
+ * 
+ * @return Returns user data pointer.
+ *
+ * @example
+ * webui_bind(myWindow, "myFunction", myFunction);
+ * 
+ * webui_set_context(myWindow, "myFunction", myData);
+ * 
+ * void myFunction(webui_event_t* e) {
+ *   void* myData = webui_get_context(e);
+ * }
+ */
+WEBUI_EXPORT void* webui_get_context(webui_event_t* e);
 
 /**
  * @brief Get the recommended web browser ID to use. If you 
@@ -329,6 +372,16 @@ WEBUI_EXPORT bool webui_show_wv(size_t window, const char* content);
  * @example webui_set_kiosk(myWindow, true);
  */
 WEBUI_EXPORT void webui_set_kiosk(size_t window, bool status);
+
+/**
+ * @brief Add a user-defined web browser's CLI parameters.
+ *
+ * @param window The window number
+ * @param params Command line parameters
+ *
+ * @example webui_set_custom_parameters(myWindow, "--remote-debugging-port=9222");
+ */
+WEBUI_EXPORT void webui_set_custom_parameters(size_t window, char *params);
 
 /**
  * @brief Set the window with high-contrast support. Useful when you want to 
@@ -447,6 +500,17 @@ WEBUI_EXPORT void webui_set_file_handler(size_t window, const void* (*handler)(c
  */
 WEBUI_EXPORT void webui_set_file_handler_window(size_t window, const void* (*handler)(size_t window, const char* filename, int* length));
 
+/**
+ * @brief Use this API to set a file handler response if your backend need async 
+ * response for `webui_set_file_handler()`.
+ *
+ * @param window The window number
+ * @param response The response buffer
+ * @param length The response size
+ *
+ * @example webui_interface_set_response_file_handler(myWindow, buffer, 1024);
+ */
+WEBUI_EXPORT void webui_interface_set_response_file_handler(size_t window, const void* response, int length);
 
 /**
  * @brief Check if the specified window is still running.
@@ -518,6 +582,17 @@ WEBUI_EXPORT void webui_free(void* ptr);
  * @example char* myBuffer = (char*)webui_malloc(1024);
  */
 WEBUI_EXPORT void* webui_malloc(size_t size);
+
+/**
+ * @brief Copy raw data.
+ *
+ * @param dest Destination memory pointer
+ * @param src Source memory pointer
+ * @param count Bytes to copy
+ *
+ * @example webui_memcpy(myBuffer, myData, 64);
+ */
+WEBUI_EXPORT void webui_memcpy(void* dest, void* src, size_t count);
 
 /**
  * @brief Safely send raw data to the UI. All clients.
@@ -719,6 +794,18 @@ WEBUI_EXPORT size_t webui_get_parent_process_id(size_t window);
  * @example size_t id = webui_get_child_process_id(myWindow);
  */
 WEBUI_EXPORT size_t webui_get_child_process_id(size_t window);
+
+/**
+ * @brief Gets Win32 window `HWND`. More reliable with WebView
+ * than web browser window, as browser PIDs may change on launch.
+ *
+ * @param window The window number
+ *
+ * @return Returns the window `hwnd` as `void*`
+ *
+ * @example HWND hwnd = webui_win32_get_hwnd(myWindow);
+ */
+WEBUI_EXPORT void* webui_win32_get_hwnd(size_t window);
 
 /**
  * @brief Get the network port of a running window.
@@ -1147,5 +1234,83 @@ WEBUI_EXPORT bool webui_interface_get_bool_at(size_t window, size_t event_number
  * @example size_t argLen = webui_interface_get_size_at(myWindow, e->event_number, 0);
  */
 WEBUI_EXPORT size_t webui_interface_get_size_at(size_t window, size_t event_number, size_t index);
+
+/**
+ * @brief Show a window using embedded HTML, or a file. If the window is already
+ * open, it will be refreshed. Single client.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ * @param content The HTML, URL, Or a local file
+ *
+ * @return Returns True if showing the window is successed.
+ *
+ * @example webui_show_client(e, "<html>...</html>"); | 
+ * webui_show_client(e, "index.html"); | webui_show_client(e, "http://...");
+ */
+WEBUI_EXPORT bool webui_interface_show_client(size_t window, size_t event_number, const char* content);
+
+/**
+ * @brief Close a specific client.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ *
+ * @example webui_close_client(e);
+ */
+WEBUI_EXPORT void webui_interface_close_client(size_t window, size_t event_number);
+
+/**
+ * @brief Safely send raw data to the UI. Single client.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ * @param function The JavaScript function to receive raw data: `function
+ * myFunc(myData){}`
+ * @param raw The raw data buffer
+ * @param size The raw data size in bytes
+ *
+ * @example webui_send_raw_client(e, "myJavaScriptFunc", myBuffer, 64);
+ */
+WEBUI_EXPORT void webui_interface_send_raw_client(size_t window, size_t event_number, const char* function, const void* raw, size_t size);
+
+/**
+ * @brief Navigate to a specific URL. Single client.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ * @param url Full HTTP URL
+ *
+ * @example webui_navigate_client(e, "http://domain.com");
+ */
+WEBUI_EXPORT void webui_interface_navigate_client(size_t window, size_t event_number, const char* url);
+
+/**
+ * @brief Run JavaScript without waiting for the response. Single client.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ * @param script The JavaScript to be run
+ *
+ * @example webui_run_client(e, "alert('Hello');");
+ */
+WEBUI_EXPORT void webui_interface_run_client(size_t window, size_t event_number, const char* script);
+
+/**
+ * @brief Run JavaScript and get the response back. Single client.
+ * Make sure your local buffer can hold the response.
+ *
+ * @param window The window number
+ * @param event_number The event number
+ * @param script The JavaScript to be run
+ * @param timeout The execution timeout in seconds
+ * @param buffer The local buffer to hold the response
+ * @param buffer_length The local buffer size
+ *
+ * @return Returns True if there is no execution error
+ *
+ * @example bool err = webui_script_client(e, "return 4 + 6;", 0, myBuffer, myBufferSize);
+ */
+WEBUI_EXPORT bool webui_interface_script_client(size_t window, size_t event_number, const char* script, size_t timeout, char* buffer, size_t buffer_length);
 
 #endif /* _WEBUI_H */

@@ -2,7 +2,7 @@
 
 ![Logo](https://raw.githubusercontent.com/webui-dev/webui-logo/14fd595844f57ce751dfc751297b1468b10de77a/webui_120.svg)
 
-# WebUI v2.5.0-beta.2
+# WebUI v2.5.0-beta.3
 
 [build-status]: https://img.shields.io/github/actions/workflow/status/webui-dev/webui/ci.yml?branch=main&style=for-the-badge&logo=githubactions&labelColor=414868&logoColor=C0CAF5
 [last-commit]: https://img.shields.io/github/last-commit/webui-dev/webui?style=for-the-badge&logo=github&logoColor=C0CAF5&labelColor=414868
@@ -86,27 +86,24 @@ Think of WebUI like a WebView controller, but instead of embedding the WebView c
 > **Note**
 > We are currently writing documentation.
 
-- [Online Documentation - C](https://webui.me/docs/#/c_api)
-- [Online Documentation - C++](https://webui.me/docs/#/cpp_api)
+- [Online Documentation](https://webui.me/docs/)
 
-## Build
+## Build WebUI Library
 
-- **Windows**
+### Windows
 
-  ```powershell
-  # GCC
-  mingw32-make
+| Compiler | Command |
+|----------|---------|
+| GCC      | `mingw32-make` |
+| MSVC     | `nmake` |
 
-  # MSVC
-  nmake
-  ```
-
-  **Windows SSL/TLS (_Optional_)**
-
+<details>
+  <summary><strong>Windows SSL/TLS (Optional)</strong></summary>
+  
   Download and install the OpenSSL pre-compiled binaries for Windows:
 
-  - MSVC: [x64 OpenSSL v3.3.1](https://slproweb.com/download/Win64OpenSSL-3_3_1.msi) or [_32Bit_](https://slproweb.com/download/Win32OpenSSL-3_3_1.msi). Please check this [Wiki list](https://wiki.openssl.org/index.php/Binaries) for more info.
-  - MinGW: [Curl for Windows win OpenSSL](https://curl.se/windows/)
+  - **MSVC**: [x64 OpenSSL v3.3.1](https://slproweb.com/download/Win64OpenSSL-3_3_1.msi) or [_32Bit_](https://slproweb.com/download/Win32OpenSSL-3_3_1.msi). See the [Wiki list](https://wiki.openssl.org/index.php/Binaries) for more info.
+  - **MinGW**: [Curl for Windows with OpenSSL](https://curl.se/windows/)
 
   ```powershell
   # GCC
@@ -115,19 +112,18 @@ Think of WebUI like a WebView controller, but instead of embedding the WebView c
   # MSVC
   nmake WEBUI_USE_TLS=1 WEBUI_TLS_INCLUDE="C:\Program Files\OpenSSL-xxx\include" WEBUI_TLS_LIB="C:\Program Files\OpenSSL-xxx\lib"
   ```
+</details>
 
-- **Linux**
+### Linux
 
-  ```sh
-  # GCC
-  make
+| Compiler | Command |
+|----------|---------|
+| GCC      | `make` |
+| Clang    | `make CC=clang` |
 
-  # Clang
-  make CC=clang
-  ```
-
-  **Linux SSL/TLS (_Optional_)**
-
+<details>
+  <summary><strong>Linux SSL/TLS (Optional)</strong></summary>
+  
   ```sh
   sudo apt update
   sudo apt install libssl-dev
@@ -138,24 +134,118 @@ Think of WebUI like a WebView controller, but instead of embedding the WebView c
   # Clang
   make WEBUI_USE_TLS=1 CC=clang
   ```
+</details>
 
-- **macOS**
+### macOS
 
-  ```sh
-  make
-  ```
+| Compiler | Command |
+|----------|---------|
+| Default  | `make` |
 
-  **macOS SSL/TLS (_Optional_)**
-
+<details>
+  <summary><strong>macOS SSL/TLS (Optional)</strong></summary>
+  
   ```sh
   brew install openssl
   make WEBUI_USE_TLS=1
   ```
+</details>
 
-## Examples
+## Minimal WebUI Application
 
-- [C](https://github.com/webui-dev/webui/tree/main/examples/C)
-- [C++](https://github.com/webui-dev/webui/tree/main/examples/C++)
+- **C**
+
+  ```c
+  #include "webui.h"
+
+  int main() {
+    size_t my_window = webui_new_window();
+    webui_show(my_window, "<html><head><script src=\"webui.js\"></script></head> Hello World ! </html>");
+    webui_wait();
+    return 0;
+  }
+  ```
+
+- **C++**
+
+  ```cpp
+  #include "webui.hpp"
+  #include <iostream>
+
+  int main() {
+    webui::window my_window;
+    my_window.show("<html><head><script src=\"webui.js\"></script></head> C++ Hello World ! </html>");
+    webui::wait();
+    return 0;
+  }
+  ```
+
+- **More C/C++ Examples**
+
+  - [C](https://github.com/webui-dev/webui/tree/main/examples/C)
+  - [C++](https://github.com/webui-dev/webui/tree/main/examples/C++)
+
+- **Other Languages**
+
+  - [Wrappers List](#Wrappers)
+
+## Build WebUI Application
+
+### Windows
+
+| Compiler | Type    | Command |
+|----------|--------|---------|
+| GCC      | Static  | `gcc -Os -Wl,-subsystem=windows my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-static -lws2_32 -Wall -luser32 -static -lole32 -o my_application.exe` |
+| GCC      | Dynamic | `gcc -Wl,-subsystem=windows my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "webui-2.dll" -lws2_32 -Wall -luser32 -lole32 -o my_application.exe` |
+| MSVC     | Static  | `cl my_application.c /I"_PATH_TO_WEBUI_INCLUDE_" /link /LIBPATH:"_PATH_TO_WEBUI_LIB_" /SUBSYSTEM:WINDOWS webui-2-static.lib user32.lib Advapi32.lib Shell32.lib Ole32.lib /OUT:my_application.exe` |
+| MSVC     | Dynamic | `cl my_application.c /I"_PATH_TO_WEBUI_INCLUDE_" /link /LIBPATH:"_PATH_TO_WEBUI_LIB_" /SUBSYSTEM:WINDOWS webui-2.lib user32.lib Advapi32.lib Shell32.lib Ole32.lib /OUT:my_application.exe` |
+
+<details>
+  <summary><strong>Windows With SSL/TLS (Optional)</strong></summary>
+  
+  | Compiler | Type    | Command |
+  |----------|--------|---------|
+  | GCC      | Static  | `gcc -Os -Wl,-subsystem=windows my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-secure-static -lws2_32 -Wall -luser32 -static -lole32 -o my_application.exe` |
+  | GCC      | Dynamic | `gcc -Wl,-subsystem=windows my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "webui-2-secure.dll" -lws2_32 -Wall -luser32 -lole32 -o my_application.exe` |
+  | MSVC     | Static  | `cl my_application.c /I"_PATH_TO_WEBUI_INCLUDE_" /link /LIBPATH:"_PATH_TO_WEBUI_LIB_" /SUBSYSTEM:WINDOWS webui-2-secure-static.lib user32.lib Advapi32.lib Shell32.lib Ole32.lib /OUT:my_application.exe` |
+  | MSVC     | Dynamic | `cl my_application.c /I"_PATH_TO_WEBUI_INCLUDE_" /link /LIBPATH:"_PATH_TO_WEBUI_LIB_" /SUBSYSTEM:WINDOWS webui-2-secure.lib user32.lib Advapi32.lib Shell32.lib Ole32.lib /OUT:my_application.exe` |
+</details>
+
+### Linux
+
+| Compiler | Type    | Command |
+|----------|--------|---------|
+| GCC      | Static  | `gcc -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-static -lpthread -lm -ldl -o my_application` |
+| GCC      | Dynamic | `gcc my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2.so" -lpthread -lm -ldl -o my_application` |
+| Clang    | Static  | `clang -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-static -lpthread -lm -ldl -o my_application` |
+| Clang    | Dynamic | `clang my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2.so" -lpthread -lm -ldl -o my_application` |
+
+<details>
+  <summary><strong>Linux With SSL/TLS (Optional)</strong></summary>
+  
+  | Compiler | Type    | Command |
+  |----------|--------|---------|
+  | GCC      | Static  | `gcc -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-secure-static -lpthread -lm -ldl -o my_application` |
+  | GCC      | Dynamic | `gcc my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2-secure.so" -lpthread -lm -ldl -o my_application` |
+  | Clang    | Static  | `clang -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-secure-static -lpthread -lm -ldl -o my_application` |
+  | Clang    | Dynamic | `clang my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2-secure.so" -lpthread -lm -ldl -o my_application` |
+</details>
+
+### macOS
+
+| Compiler | Type    | Command |
+|----------|--------|---------|
+| Clang    | Static  | `clang -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-static -lpthread -lm -framework Cocoa -framework WebKit -o my_application` |
+| Clang    | Dynamic | `clang my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2.dylib" -lpthread -lm -framework Cocoa -framework WebKit -o my_application` |
+
+<details>
+  <summary><strong>macOS With SSL/TLS (Optional)</strong></summary>
+  
+  | Compiler | Type    | Command |
+  |----------|--------|---------|
+  | Clang    | Static  | `clang -Os my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" -lwebui-2-secure-static -lpthread -lm -framework Cocoa -framework WebKit -o my_application` |
+  | Clang    | Dynamic | `clang my_application.c -I"_PATH_TO_WEBUI_INCLUDE_" -L"_PATH_TO_WEBUI_LIB_" "./webui-2-secure.dylib" -lpthread -lm -framework Cocoa -framework WebKit -o my_application` |
+</details>
 
 ## Wrappers
 

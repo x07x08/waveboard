@@ -65,6 +65,12 @@ pub fn bind(
     return c.webui_bind(self.window_handle, element.ptr, tmp_struct.handle);
 }
 
+/// Use this API after using `bind()` to add any user data to it that can be
+/// read later using `getContext()`
+pub fn setContext(self: webui, element: [:0]const u8, context: *anyopaque) void {
+    c.webui_set_context(self.window_handle, element.ptr, context);
+}
+
 /// Get the recommended web browser ID to use. If you
 /// are already using one, this function will return the same ID.
 pub fn getBestBrowser(self: webui) Browser {
@@ -104,6 +110,20 @@ pub fn showWv(self: webui, content: [:0]const u8) bool {
 /// Set the window in Kiosk mode (Full screen)
 pub fn setKiosk(self: webui, status: bool) void {
     c.webui_set_kiosk(self.window_handle, status);
+}
+
+/// Add a user-defined web browser's CLI parameters.
+pub fn setCustomParameters(self: webui, params: [:0]const u8) void {
+    c.webui_set_custom_parameters(self.window_handle, params.ptr);
+}
+/// Set the window with high-contrast support. Useful when you want to
+/// build a better high-contrast theme with CSS.
+pub fn setHighContrast(self: webui, status: bool) void {
+    c.webui_set_high_contrast(self.window_handle, status);
+}
+
+pub fn isHighConstrast() bool {
+    return c.webui_is_high_contrast();
 }
 
 /// Check if a web browser is installed.
@@ -181,6 +201,16 @@ pub fn setFileHandlerWindow(self: webui, comptime handler: fn (window_handle: us
     c.webui_set_file_handler_window(self.window_handle, tmp_struct.handle);
 }
 
+/// Use this API to set a file handler response if your backend need async
+/// response for `setFileHandler()`.
+pub fn interfaceSetResponseFileHandler(self: webui, response: []u8) void {
+    c.webui_interface_set_response_file_handler(
+        self.window_handle,
+        @ptrCast(response.ptr),
+        response.len,
+    );
+}
+
 /// Check if the specified window is still running.
 pub fn isShown(self: webui) bool {
     return c.webui_is_shown(self.window_handle);
@@ -228,9 +258,15 @@ pub fn free(buf: []const u8) void {
 /// Safely allocate memory using the WebUI memory management system
 /// it can be safely freed using `free()` at any time.
 /// In general, you should not use this function
-pub fn malloc(size: usize) []u8 {
-    const ptr = c.webui_malloc(size).?; // TODO: Proper allocation failure check
+pub fn malloc(size: usize) ![]u8 {
+    const ptr = c.webui_malloc(size) orelse return error.AllocateFailed;
     return @as([*]u8, @ptrCast(ptr))[0..size];
+}
+
+/// Copy raw data
+/// In general, you should not use this function
+pub fn memcpy(dst: []u8, src: []const u8) void {
+    c.webui_memcpy(@ptrCast(dst.ptr), @ptrCast(src.ptr), src.len);
 }
 
 /// Safely send raw data to the UI. All clients.
@@ -536,6 +572,41 @@ pub fn interfaceGetSizeAt(self: webui, event_number: usize, index: usize) usize 
     return c.webui_interface_get_size_at(self.window_handle, event_number, index);
 }
 
+// Show a window using embedded HTML, or a file. If the window is already
+pub fn interfaceShowClient(self: webui, event_number: usize, content: [:0]const u8) bool {
+    return c.webui_interface_show_client(self.window_handle, event_number, content.ptr);
+}
+
+// Close a specific client.
+pub fn interfaceCloseClient(self: webui, event_number: usize) void {
+    c.webui_interface_close_client(self.window_handle, event_number);
+}
+
+// Safely send raw data to the UI. Single client.
+pub fn interfaceSendRawClient(
+    self: webui,
+    event_number: usize,
+    function: [:0]const u8,
+    raw: []const u8,
+) void {
+    c.webui_interface_send_raw_client(self.window_handle, event_number, function.ptr, raw.ptr, raw.len);
+}
+
+// Navigate to a specific URL. Single client.
+pub fn interfaceNavigateClient(self: webui, event_number: usize, url: [:0]const u8) void {
+    c.webui_interface_navigate_client(self.window_handle, event_number, url.ptr);
+}
+
+// Run JavaScript without waiting for the response. Single client.
+pub fn interfaceRunClient(self: webui, event_number: usize, script_content: [:0]const u8) void {
+    c.webui_interface_run_client(self.window_handle, event_number, script_content.ptr);
+}
+
+// Run JavaScript and get the response back. Single client.
+pub fn interfaceScriptClient(self: webui, event_number: usize, script_content: [:0]const u8, timeout: usize, buffer: []u8) void {
+    c.webui_interface_script_client(self.window_handle, event_number, script_content.ptr, timeout, buffer.ptr, buffer.len);
+}
+
 /// a very convenient function for binding callback.
 /// you just need to pase a function to get param.
 /// no need to care webui param api.
@@ -752,15 +823,17 @@ pub const Config = enum(c_int) {
     /// root folder gets changed.
     /// Default: False
     folder_monitor,
-    /// Allow multiple clients to connect to the same window,
-    /// This is helpful for web apps (non-desktop software),
-    /// Please see the documentation for more details.
-    /// Default: False
+    /// Allow or prevent WebUI from adding `webui_auth` cookies.
+    /// WebUI uses these cookies to identify clients and block
+    /// unauthorized access to the window content using a URL.
+    /// Please keep this option to `True` if you want only a single
+    /// client to access the window content.
+    /// Default: True
     multi_client,
     /// Allow multiple clients to connect to the same window,
     /// This is helpful for web apps (non-desktop software),
     /// Please see the documentation for more details.
-    /// Default: False
+    /// Default: True
     use_cookies,
 };
 
@@ -955,5 +1028,10 @@ pub const Event = extern struct {
     /// Get size in bytes of the first argument
     pub fn getSize(e: *Event) usize {
         return c.webui_get_size(e);
+    }
+
+    /// Get user data that is set using `SetContext()`.
+    pub fn getContext(e: *Event) *anyopaque {
+        return c.webui_get_context(e);
     }
 };

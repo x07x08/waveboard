@@ -397,6 +397,15 @@ const Ctx = struct {
             @panic("Port already in use. Open the generated settings file to change it");
         }
 
+        const dir = std.fs.cwd();
+        if (dir.stat("web")) |s| {
+            if (s.kind != .directory) {
+                @panic("Web folder not found.");
+            }
+        } else |_| {
+            @panic("Web folder not found.");
+        }
+
         window.setPublic(settings.publicHost);
 
         _ = window.bind("initializeUI", initUI);

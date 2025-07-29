@@ -8,8 +8,7 @@ const rgx = @import("regex");
 // https://git.sr.ht/~delitako/nyoomcat/tree/main/item/src/main.zig#L44,379
 
 const win = if (native_os == .windows) struct {
-    const WINAPI = std.os.windows.WINAPI;
-    extern "c" fn signal(sig: c_int, func: *const fn (c_int, c_int) callconv(WINAPI) void) callconv(.c) *anyopaque;
+    extern "c" fn signal(sig: c_int, func: *const fn (c_int, c_int) callconv(.winapi) void) callconv(.c) *anyopaque;
 } else {};
 
 const c = @cImport({
@@ -349,11 +348,11 @@ const Ctx = struct {
         },
     };
 
-    fn handleSigIntWin(sig: c_int, _: c_int) callconv(.C) void {
+    fn handleSigIntWin(sig: c_int, _: c_int) callconv(.c) void {
         handleSigInt(sig);
     }
 
-    fn handleSigInt(sig: i32) callconv(.C) void {
+    fn handleSigInt(sig: i32) callconv(.c) void {
         switch (sig) {
             std.c.SIG.INT => {
                 Ctx.mustExit = true;
@@ -393,14 +392,14 @@ const Ctx = struct {
         webui.setConfig(.multi_client, settings.multiClient);
         webui.setConfig(.ui_event_blocking, false);
 
-        if (!window.setPort(settings.defaultPort)) {
+        window.setPort(settings.defaultPort) catch {
             @panic("Port already in use. Open the generated settings file to change it");
-        }
+        };
 
         window.setPublic(settings.publicHost);
 
-        _ = window.bind("initializeUI", initUI);
-        _ = window.startServer("web");
+        _ = window.bind("initializeUI", initUI) catch unreachable;
+        _ = window.startServer("web") catch unreachable;
 
         std.debug.print("Navigate to any of these URLs to open up the GUI :\n", .{});
 
@@ -416,7 +415,7 @@ const Ctx = struct {
                 continue;
             }
 
-            std.debug.print("http://{}\n", .{address});
+            std.debug.print("http://{f}\n", .{address});
         }
 
         if (settings.publicHost) {
@@ -432,7 +431,7 @@ const Ctx = struct {
                     continue;
                 }
 
-                std.debug.print("http://{}\n", .{address});
+                std.debug.print("http://{f}\n", .{address});
             }
         }
 
@@ -483,7 +482,7 @@ const Ctx = struct {
         cleanKbHook();
     }
 
-    fn kbHookCallback(event: [*c]c.uiohook_event, _: ?*anyopaque) callconv(.C) void {
+    fn kbHookCallback(event: [*c]c.uiohook_event, _: ?*anyopaque) callconv(.c) void {
         if ((event.*.type != c.EVENT_KEY_PRESSED) or
             (Ctx.tabs.audio.tracksList.items.len == 0) or
             Ctx.mustExit) return;
@@ -591,7 +590,7 @@ const Ctx = struct {
         tabs.audio.bindingRow = -1;
     }
 
-    fn debugLogCallback(_: c_uint, _: ?*anyopaque, format: [*c]const u8, args: *anyopaque) callconv(.C) void {
+    fn debugLogCallback(_: c_uint, _: ?*anyopaque, format: [*c]const u8, args: *anyopaque) callconv(.c) void {
         _ = c.vprintf(format, @alignCast(@ptrCast(args)));
     }
 
@@ -822,7 +821,7 @@ const SettingsTabInterface = struct {
             .truncate = true,
         });
 
-        const currentSettings = try std.json.stringifyAlloc(Ctx.allocator, self.values, .{
+        const currentSettings = try std.json.Stringify.valueAlloc(Ctx.allocator, self.values, .{
             .whitespace = .indent_tab,
         });
         defer Ctx.allocator.free(currentSettings);
@@ -847,8 +846,8 @@ const SettingsTabInterface = struct {
     }
 
     fn init(self: *SettingsTabInterface) void {
-        _ = Ctx.window.bind("call_setAnimations", SettingsTabInterface.call_setAnimations);
-        _ = Ctx.window.bind("call_setDarkMode", SettingsTabInterface.call_setDarkMode);
+        _ = Ctx.window.bind("call_setAnimations", SettingsTabInterface.call_setAnimations) catch unreachable;
+        _ = Ctx.window.bind("call_setDarkMode", SettingsTabInterface.call_setDarkMode) catch unreachable;
 
         self.cwd = std.fs.cwd();
 
@@ -924,7 +923,7 @@ const LogTabInterface = struct {
         var sTime = @divTrunc(msTime, std.time.ms_per_s);
         const currTime = c.localtime(&sTime);
 
-        const newMsg = std.fmt.allocPrintZ(
+        const newMsg = std.fmt.allocPrintSentinel(
             Ctx.allocator,
             "{d:02}/{d:02}/{d:04} - {d:02}:{d:02}:{d:02}.{d:04}: " ++ format ++ "\n",
             .{
@@ -936,6 +935,7 @@ const LogTabInterface = struct {
                 @as(c_uint, @bitCast(currTime.*.tm_sec)),
                 @as(u64, @bitCast(msTime - sTime * std.time.ms_per_s)),
             } ++ args,
+            0,
         ) catch unreachable;
         defer Ctx.allocator.free(newMsg);
 
@@ -1026,8 +1026,8 @@ const LogTabInterface = struct {
     }
 
     fn init(self: *LogTabInterface) void {
-        _ = Ctx.window.bind("call_selectLogOutFile", LogTabInterface.call_selectLogOutFile);
-        _ = Ctx.window.bind("call_clearLogOutFile", LogTabInterface.call_clearLogOutFile);
+        _ = Ctx.window.bind("call_selectLogOutFile", LogTabInterface.call_selectLogOutFile) catch unreachable;
+        _ = Ctx.window.bind("call_clearLogOutFile", LogTabInterface.call_clearLogOutFile) catch unreachable;
 
         self.contents = Ctx.allocator.alloc(u8, 0) catch unreachable;
 
@@ -1776,7 +1776,7 @@ const AudioTabInterface = struct {
         pOutput: ?*anyopaque,
         _: ?*const anyopaque,
         iFrameCount: c.ma_uint32,
-    ) callconv(.C) void {
+    ) callconv(.c) void {
         var castEngine: *ClosableEngine = @alignCast(@ptrCast(pDevice.*.pUserData));
 
         if (castEngine.closed) {
@@ -1934,17 +1934,17 @@ const AudioTabInterface = struct {
     }
 
     fn init(self: *AudioTabInterface) void {
-        _ = Ctx.window.bind("call_selectAudioDir", AudioTabInterface.call_selectAudioDir);
-        _ = Ctx.window.bind("call_play", AudioTabInterface.call_play);
-        _ = Ctx.window.bind("call_setVolume", AudioTabInterface.call_setVolume);
-        _ = Ctx.window.bind("call_setSolo", AudioTabInterface.call_setSolo);
-        _ = Ctx.window.bind("call_setDevice", AudioTabInterface.call_setDevice);
-        _ = Ctx.window.bind("call_setBinding", AudioTabInterface.call_setBinding);
-        _ = Ctx.window.bind("call_setSampleRate", AudioTabInterface.call_setSampleRate);
-        _ = Ctx.window.bind("call_setGlobalVolume", AudioTabInterface.call_setGlobalVolume);
-        _ = Ctx.window.bind("call_setThreshold", AudioTabInterface.call_setThreshold);
-        _ = Ctx.window.bind("call_setAttackTime", AudioTabInterface.call_setAttackTime);
-        _ = Ctx.window.bind("call_setReleaseTime", AudioTabInterface.call_setReleaseTime);
+        _ = Ctx.window.bind("call_selectAudioDir", AudioTabInterface.call_selectAudioDir) catch unreachable;
+        _ = Ctx.window.bind("call_play", AudioTabInterface.call_play) catch unreachable;
+        _ = Ctx.window.bind("call_setVolume", AudioTabInterface.call_setVolume) catch unreachable;
+        _ = Ctx.window.bind("call_setSolo", AudioTabInterface.call_setSolo) catch unreachable;
+        _ = Ctx.window.bind("call_setDevice", AudioTabInterface.call_setDevice) catch unreachable;
+        _ = Ctx.window.bind("call_setBinding", AudioTabInterface.call_setBinding) catch unreachable;
+        _ = Ctx.window.bind("call_setSampleRate", AudioTabInterface.call_setSampleRate) catch unreachable;
+        _ = Ctx.window.bind("call_setGlobalVolume", AudioTabInterface.call_setGlobalVolume) catch unreachable;
+        _ = Ctx.window.bind("call_setThreshold", AudioTabInterface.call_setThreshold) catch unreachable;
+        _ = Ctx.window.bind("call_setAttackTime", AudioTabInterface.call_setAttackTime) catch unreachable;
+        _ = Ctx.window.bind("call_setReleaseTime", AudioTabInterface.call_setReleaseTime) catch unreachable;
 
         self.watchLoop.data.terminate = &Ctx.mustExit;
         self.watchLoop.call();
@@ -2330,11 +2330,11 @@ const DownloaderTabInterface = struct {
     }
 
     fn init(self: *DownloaderTabInterface) void {
-        _ = Ctx.window.bind("call_selectDownloadsDir", DownloaderTabInterface.call_selectDownloadsDir);
-        _ = Ctx.window.bind("call_selectYTDLBinary", DownloaderTabInterface.call_selectYTDLBinary);
-        _ = Ctx.window.bind("call_setVideoSizeLimit", DownloaderTabInterface.call_setVideoSizeLimit);
-        _ = Ctx.window.bind("call_setPlayAfter", DownloaderTabInterface.call_setPlayAfter);
-        _ = Ctx.window.bind("call_downloadVideo", DownloaderTabInterface.call_downloadVideo);
+        _ = Ctx.window.bind("call_selectDownloadsDir", DownloaderTabInterface.call_selectDownloadsDir) catch unreachable;
+        _ = Ctx.window.bind("call_selectYTDLBinary", DownloaderTabInterface.call_selectYTDLBinary) catch unreachable;
+        _ = Ctx.window.bind("call_setVideoSizeLimit", DownloaderTabInterface.call_setVideoSizeLimit) catch unreachable;
+        _ = Ctx.window.bind("call_setPlayAfter", DownloaderTabInterface.call_setPlayAfter) catch unreachable;
+        _ = Ctx.window.bind("call_downloadVideo", DownloaderTabInterface.call_downloadVideo) catch unreachable;
 
         if (Ctx.settings.ytdlPath) |path| {
             if (Ctx.tabs.settings.cwd.openFile(path, .{})) |file| {
@@ -2905,15 +2905,15 @@ const WatchTabInterface = struct {
     }
 
     fn init(self: *WatchTabInterface) void {
-        _ = Ctx.window.bind("call_selectWatchFile", WatchTabInterface.call_selectWatchFile);
-        _ = Ctx.window.bind("call_setAllowed", WatchTabInterface.call_setAllowed);
-        _ = Ctx.window.bind("call_setTimestampedLog", WatchTabInterface.call_setTimestampedLog);
-        _ = Ctx.window.bind("call_setChatRegex", WatchTabInterface.call_setChatRegex);
-        _ = Ctx.window.bind("call_setSeparatorRegex", WatchTabInterface.call_setSeparatorRegex);
-        _ = Ctx.window.bind("call_addUser", WatchTabInterface.call_addUser);
-        _ = Ctx.window.bind("call_removeUser", WatchTabInterface.call_removeUser);
-        _ = Ctx.window.bind("call_removeQueued", WatchTabInterface.call_removeQueued);
-        _ = Ctx.window.bind("call_setQueueLimit", WatchTabInterface.call_setQueueLimit);
+        _ = Ctx.window.bind("call_selectWatchFile", WatchTabInterface.call_selectWatchFile) catch unreachable;
+        _ = Ctx.window.bind("call_setAllowed", WatchTabInterface.call_setAllowed) catch unreachable;
+        _ = Ctx.window.bind("call_setTimestampedLog", WatchTabInterface.call_setTimestampedLog) catch unreachable;
+        _ = Ctx.window.bind("call_setChatRegex", WatchTabInterface.call_setChatRegex) catch unreachable;
+        _ = Ctx.window.bind("call_setSeparatorRegex", WatchTabInterface.call_setSeparatorRegex) catch unreachable;
+        _ = Ctx.window.bind("call_addUser", WatchTabInterface.call_addUser) catch unreachable;
+        _ = Ctx.window.bind("call_removeUser", WatchTabInterface.call_removeUser) catch unreachable;
+        _ = Ctx.window.bind("call_removeQueued", WatchTabInterface.call_removeQueued) catch unreachable;
+        _ = Ctx.window.bind("call_setQueueLimit", WatchTabInterface.call_setQueueLimit) catch unreachable;
 
         self.watchLoop.data.terminate = &Ctx.mustExit;
         self.watchLoop.call();
@@ -3251,13 +3251,13 @@ const TTSTabInterface = struct {
     }
 
     fn init(_: *TTSTabInterface) void {
-        _ = Ctx.window.bind("call_setTTSArgs", TTSTabInterface.call_setTTSArgs);
-        _ = Ctx.window.bind("call_selectTTSBinary", TTSTabInterface.call_selectTTSBinary);
-        _ = Ctx.window.bind("call_selectTTSFile", TTSTabInterface.call_selectTTSFile);
-        _ = Ctx.window.bind("call_setTTSRate", TTSTabInterface.call_setTTSRate);
-        _ = Ctx.window.bind("call_setTTSVolume", TTSTabInterface.call_setTTSVolume);
-        _ = Ctx.window.bind("call_setTTSVoice", TTSTabInterface.call_setTTSVoice);
-        _ = Ctx.window.bind("call_speakTTS", TTSTabInterface.call_speakTTS);
+        _ = Ctx.window.bind("call_setTTSArgs", TTSTabInterface.call_setTTSArgs) catch unreachable;
+        _ = Ctx.window.bind("call_selectTTSBinary", TTSTabInterface.call_selectTTSBinary) catch unreachable;
+        _ = Ctx.window.bind("call_selectTTSFile", TTSTabInterface.call_selectTTSFile) catch unreachable;
+        _ = Ctx.window.bind("call_setTTSRate", TTSTabInterface.call_setTTSRate) catch unreachable;
+        _ = Ctx.window.bind("call_setTTSVolume", TTSTabInterface.call_setTTSVolume) catch unreachable;
+        _ = Ctx.window.bind("call_setTTSVoice", TTSTabInterface.call_setTTSVoice) catch unreachable;
+        _ = Ctx.window.bind("call_speakTTS", TTSTabInterface.call_speakTTS) catch unreachable;
 
         Ctx.tabs.logOut.logToEntry("Initialized TTS tab", .{});
     }
@@ -3327,7 +3327,7 @@ const TTSTabInterface = struct {
 };
 
 fn jsCode(comptime format: []const u8, args: anytype) void {
-    const newCmd = std.fmt.allocPrintZ(Ctx.allocator, format, args) catch unreachable;
+    const newCmd = std.fmt.allocPrintSentinel(Ctx.allocator, format, args, 0) catch unreachable;
     defer Ctx.allocator.free(newCmd);
 
     const cmdString = Ctx.allocator.allocSentinel(

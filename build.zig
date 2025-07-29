@@ -142,6 +142,8 @@ pub fn build(b: *std.Build) void {
         exe.addWin32ResourceFile(.{
             .file = b.path("src/win32/waveboard_zig.rc"),
         });
+
+        exe.linkSystemLibrary("ws2_32", .{});
     }
 
     const inc_path = "src/c_src/include/";

@@ -23,6 +23,7 @@ pub fn build(b: *Build) !void {
 
     const is_dynamic = b.option(bool, "dynamic", "build the dynamic library") orelse false;
     const enable_tls = b.option(bool, "enable-tls", "enable TLS support") orelse false;
+    const enable_webui_log = b.option(bool, "enable-webui-log", "Enable WebUI log output") orelse false;
     const verbose = b.option(std.log.Level, "verbose", "set verbose output") orelse .warn;
     global_log_level = verbose;
     // TODO: Support list of dependencies once support is limited to >0.13.0
@@ -42,7 +43,7 @@ pub fn build(b: *Build) !void {
         log(.info, .WebUI, "Done.", .{});
     }
 
-    const webui = if (is_dynamic) b.addSharedLibrary(.{
+    const webui = if (builtin.zig_version.minor == 14) (if (is_dynamic) b.addSharedLibrary(.{
         .name = lib_name,
         .target = target,
         .optimize = optimize,
@@ -51,8 +52,19 @@ pub fn build(b: *Build) !void {
         .name = lib_name,
         .target = target,
         .optimize = optimize,
+    })) else b.addLibrary(.{
+        .name = lib_name,
+        .linkage = if (is_dynamic) .dynamic else .static,
+        .root_module = b.createModule(.{
+            // not, pic enabled, zig will not allow to build a static library
+            // .pic = is_dynamic,
+            .pic = if (is_dynamic) is_dynamic else true,
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-    try addLinkerFlags(b, webui, enable_tls, debug_dependencies);
+
+    try addLinkerFlags(b, webui, enable_tls, debug_dependencies, enable_webui_log);
 
     b.installArtifact(webui);
 
@@ -64,6 +76,7 @@ fn addLinkerFlags(
     webui: *Compile,
     enable_tls: bool,
     debug_dependencies: DebugDependencies,
+    enable_webui_log: bool,
 ) !void {
     const webui_target = webui.rootModuleTarget();
     const is_windows = webui_target.os.tag == .windows;
@@ -80,7 +93,7 @@ fn addLinkerFlags(
         "-Wno-error=date-time",
     };
 
-    if (debug) {
+    if (debug and enable_webui_log) {
         webui.root_module.addCMacro("WEBUI_LOG", "");
     }
     webui.addCSourceFile(.{
@@ -130,10 +143,12 @@ fn addLinkerFlags(
     for (webui.root_module.link_objects.items) |lo| {
         switch (lo) {
             .c_source_file => |csf| {
-                log(.debug, .WebUI, "{s} linker flags: {s}", .{
+                log(.debug, .WebUI, "{s} linker flags:\n", .{
                     csf.file.src_path.sub_path,
-                    csf.flags,
                 });
+                for (csf.flags) |flag| {
+                    log(.debug, .WebUI, "  {s}", .{flag});
+                }
             },
             else => {},
         }
@@ -163,10 +178,17 @@ fn build_examples(b: *Build, webui: *Compile) !void {
         }
         const example_name = val.name;
 
-        const exe = b.addExecutable(.{
+        const exe = b.addExecutable(if (builtin.zig_version.minor == 14) .{
             .name = example_name,
             .target = target,
             .optimize = optimize,
+        } else .{
+            .name = example_name,
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .pic = true,
+            }),
         });
         const path = try std.fmt.allocPrint(b.allocator, "examples/C/{s}/main.c", .{example_name});
         defer b.allocator.free(path);
